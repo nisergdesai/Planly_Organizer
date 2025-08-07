@@ -8,7 +8,7 @@ CANVAS_BASE_URL = "https://canvas.ucsc.edu"
 HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
 
 def get_active_courses():
-    url = f"{CANVAS_BASE_URL}/api/v1/courses?include[]=syllabus_body&enrollment_state=active"
+    url = f"{CANVAS_BASE_URL}/api/v1/courses?include[]=syllabus_body&enrollment_state=past"
     response = requests.get(url, headers=HEADERS)
     return response.json() if response.status_code == 200 else []
 

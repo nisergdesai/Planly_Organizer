@@ -35,7 +35,7 @@ class CustomDistilBertForSequenceClassification(DistilBertForSequenceClassificat
 base_model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased", num_labels=3)
 
 # Load the custom model, using the base model's config and weights
-model = CustomDistilBertForSequenceClassification.from_pretrained('model_trainer/email_task_classifier_cpu', config=base_model.config)
+model = CustomDistilBertForSequenceClassification.from_pretrained('email_task_classifier_cpu', config=base_model.config)
 
 # Load the tokenizer
 tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
@@ -81,26 +81,69 @@ def predict_sentences(text):
     # Join the selected sentences into one paragraph
     return ' '.join(results)
 
-def predict_sentences_action_notes(text):
-    sentences = sent_tokenize(text)  # Split the text into sentences
-    results = []
-
-    for sentence in sentences:
-        label = predict(sentence)  # Predict the label for each sentence
-        if label == 0 or label == 1:  # Check if the label is Action Task (0) or Important Note (1)
-            results.append(sentence)  # Add the sentence to results if it matches the labels
-
-    # Join the selected sentences into one paragraph
-    return ' '.join(results)
-
 # Example: Feed a paragraph for prediction
 text = """
-While Stephen King is a bestselling horror author, his book On Writing is equal parts memoir and general writing advice for those seeking to hone their craft.  While aimed at writers of fiction, this chapter offers some helpful tips (as well as King's own pet peeves) that could be applied to a variety of writing situations.
-In a 250-500 word response, what aspects of King's toolbox (or his advice) do you find the most useful for writers in WRIT 2?  What do find not so useful?  As a writer, what is in your "toolbox"?"""
+Niserg, your progress is unstoppable
+ 
+Challenge yourself with a new lesson!
+
+ 
+CONTINUE LEARNING
+ 
+ 
+Your weekly report
+February 15 - February 21
+
+ 
+You earned 210% more XP this week. You surpassed 99% of Duolingo learners!
+
+ 
+2127
+1063
+0
+306 XP
+
+687 XP
+
+2127 XP
+
+2 Weeks Ago	Last Week	This Week
+ 
+You’re currently on a 79 day streak.
+
+ 
+Sa	Su	Mo	Tu	We	Th	Fr
+						
+ 
+54 lessons
+You completed 29 more lessons than the previous week.
+
+Medal
+ 
+169 minutes
+You spent 94 more minutes learning than the previous week.
+
+Clock
+ 
+ 
+
+You made Duo proud!
+Down time adds up, and you made it count learning something new. Now that’s what we call screen time well spent!
+
+ 
+CONTINUE LEARNING
+ 
+ 
+5900 Penn Avenue, Pittsburgh PA 15206, USA
+Unsubscribe
+
+Instagram	Twitter	Facebook	TikTok
+...
+"""
 # Get predictions for action tasks and important notes
-#output_paragraph = predict_sentences_action_notes(text)
+output_paragraph = predict_sentences(text)
 
 # Print the output paragraph
-#print("Output Paragraph:")
-#print(output_paragraph)
+print("Output Paragraph:")
+print(output_paragraph)
 

@@ -409,6 +409,32 @@ def index():
     except Exception as e:
         print(f"Error in index: {str(e)}")
         return jsonify({"status": "healthy", "message": "Flask backend is running"})
+@app.route('/get_courses', methods=['GET'])
+def get_courses():
+    print("Get courses endpoint hit!")
+    try:
+        # Get active courses from Canvas using your existing function
+        courses = get_active_courses()
+        
+        # Format courses for frontend
+        formatted_courses = []
+        for course in courses:
+            formatted_courses.append({
+                "id": str(course.get('id', '')),
+                "name": course.get('name', 'Unknown Course')
+            })
+        
+        print(f"Found {len(formatted_courses)} courses")
+        return jsonify({"status": "success", "courses": formatted_courses})
+        
+    except Exception as e:
+        print(f"Error in get_courses: {str(e)}")
+        # Return mock data for testing if Canvas API fails
+        return jsonify({
+            "status": "error", 
+            "message": str(e),
+            "courses": []
+        })
 
 @app.route('/course_details', methods=['POST'])
 def course_details():

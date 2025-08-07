@@ -24,15 +24,29 @@ export function CanvasCard({ storeData, state, setState }: CanvasCardProps) {
 
   const connectCanvas = async () => {
     updateState({ status: "Connecting Canvas... ⏳" })
-    // Add your Canvas connection logic here
-    setTimeout(() => {
-      updateState({ status: "Connected ✅" })
-    }, 2000)
+    
+    try {
+      // Fetch real courses from Flask backend
+      const response = await fetch("http://localhost:5001/get_courses")
+      const data = await response.json()
+      
+      if (data.status === "success" && data.courses) {
+        updateState({ 
+          status: "Connected ✅",
+          courses: data.courses 
+        })
+      } else {
+        updateState({ status: "Connection failed ❌" })
+      }
+    } catch (error) {
+      console.error("Error connecting to Canvas:", error)
+      updateState({ status: "Connection failed ❌" })
+    }
   }
 
   const fetchContent = async (courseId: string, contentType: string) => {
     try {
-      const response = await fetch("/api/course_details", {
+      const response = await fetch("http://localhost:5001/course_details", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -42,7 +56,6 @@ export function CanvasCard({ storeData, state, setState }: CanvasCardProps) {
       })
 
       const data = await response.json()
-
       if (data.content) {
         updateState({ courseContent: data.content })
         const contentData: DataItem[] = [
@@ -63,48 +76,34 @@ export function CanvasCard({ storeData, state, setState }: CanvasCardProps) {
     }
   }
 
-  useEffect(() => {
-    // Only fetch courses if we don't have them already
-    if (courses.length === 0) {
-      // In a real implementation, you would fetch courses from your backend
-      // For now, we'll use placeholder data
-      updateState({
-        courses: [
-          { id: "1", name: "Course 1" },
-          { id: "2", name: "Course 2" },
-          { id: "3", name: "Course 3" },
-        ],
-      })
-    }
-  }, [courses.length]) // Removed updateState from dependencies
-
   return (
     <div className="bg-amber-900/15 p-8 rounded-xl shadow-lg border border-white/20 mb-8">
       <h2 className="text-2xl font-bold mb-4">Canvas</h2>
-
       <Button
         onClick={connectCanvas}
         className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700 mb-4"
+        disabled={status.includes("⏳")}
       >
-        Connect Canvas
+        {status.includes("⏳") ? "Connecting..." : "Connect Canvas"}
       </Button>
-
       <p className="mb-4">Status: {status}</p>
 
-      <div className="mb-6">
-        <select
-          value={selectedCourse}
-          onChange={(e) => updateState({ selectedCourse: e.target.value })}
-          className="p-3 rounded-md border border-gray-300 text-gray-900 w-full max-w-md"
-        >
-          <option value="">Select a Course</option>
-          {courses.map((course) => (
-            <option key={course.id} value={course.id}>
-              {course.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      {courses.length > 0 && (
+        <div className="mb-6">
+          <select
+            value={selectedCourse}
+            onChange={(e) => updateState({ selectedCourse: e.target.value })}
+            className="p-3 rounded-md border border-gray-300 text-gray-900 w-full max-w-md"
+          >
+            <option value="">Select a Course</option>
+            {courses.map((course) => (
+              <option key={course.id} value={course.id}>
+                {course.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {selectedCourse && (
         <div className="space-y-4">
@@ -131,7 +130,10 @@ export function CanvasCard({ storeData, state, setState }: CanvasCardProps) {
 
           {courseContent && (
             <div className="mt-4 p-4 bg-white/10 rounded-lg">
-              <div className="whitespace-pre-wrap">{courseContent}</div>
+              <div 
+                className="whitespace-pre-wrap"
+                dangerouslySetInnerHTML={{ __html: courseContent }}
+              />
             </div>
           )}
         </div>
