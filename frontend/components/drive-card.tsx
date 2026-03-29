@@ -2,9 +2,11 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Loader2 } from "lucide-react"
+import { Loader2, RefreshCw, Unplug } from "lucide-react"
+import { useToast } from "@/lib/toast-context"
 import {
   apiClient,
+  ApiError,
   type DriveFile,
   type DriveConnectResponse,
   type SummarizeFileResponse,
@@ -16,6 +18,7 @@ interface DriveCardProps {
   storeData: (service: string, data: DataItem[]) => void
   state: DriveState
   setState: (state: DriveState) => void
+  onDisconnect: () => void
 }
 
 interface DriveAccount {
@@ -23,12 +26,14 @@ interface DriveAccount {
   email: string
   files: DriveFile[]
   isConnected: boolean
-  summaries: Record<string, { summary: string; originalText: string }>
+  summaries: Record<string, { summary: string; originalText: string; cached?: boolean; cachedAt?: string }>
   answers: Record<string, string>
 }
 
-export function DriveCard({ storeData, state, setState }: DriveCardProps) {
+export function DriveCard({ storeData, state, setState, onDisconnect }: DriveCardProps) {
   const { status, accounts, connectedCount } = state
+  const toast = useToast()
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false)
 
   const updateState = (updates: Partial<DriveState>) => {
     setState({ ...state, ...updates })
@@ -66,12 +71,18 @@ export function DriveCard({ storeData, state, setState }: DriveCardProps) {
         }
 
         updateState({ accounts: [...accounts, newAccount] })
+        toast.success("Google Drive connected successfully!")
       } else {
         updateState({ status: "Connection Failed ❌" })
+        toast.error("Failed to connect Google Drive.")
       }
     } catch (error) {
       updateState({ status: "Connection Error ❌" })
-      console.error("Drive connection error:", error)
+      if (error instanceof ApiError) {
+        toast.error(error.friendlyMessage)
+      } else {
+        toast.error("Unable to connect to server. Please check your connection.")
+      }
     }
   }
 
@@ -101,23 +112,30 @@ export function DriveCard({ storeData, state, setState }: DriveCardProps) {
           account: data.email_address,
         }))
         storeData("drive", driveData)
+        toast.success("Files loaded successfully!")
       } else {
         updateState({ status: "Failed to fetch files ❌" })
+        toast.error("Failed to fetch Drive files.")
       }
     } catch (error) {
       updateState({ status: "Error fetching files ❌" })
-      console.error("Error fetching files:", error)
+      if (error instanceof ApiError) {
+        toast.error(error.friendlyMessage)
+      } else {
+        toast.error("Unable to connect to server. Please check your connection.")
+      }
     }
   }
 
-  const summarizeFile = async (fileId: string, fileName: string, mimeType: string, accountId: string) => {
+  const summarizeFile = async (fileId: string, fileName: string, mimeType: string, accountId: string, forceRefresh = false) => {
     try {
       const data: SummarizeFileResponse = await apiClient.summarizeFile(
         fileId,
         fileName,
         mimeType,
         "drive",
-        accountId
+        accountId,
+        forceRefresh,
       )
 
       if (data.summary) {
@@ -143,6 +161,8 @@ export function DriveCard({ storeData, state, setState }: DriveCardProps) {
                     [fileId]: {
                       summary: data.summary,
                       originalText: data.original_text,
+                      cached: (data as any).cached || false,
+                      cachedAt: (data as any).cached_at || null,
                     },
                   },
                 }
@@ -150,10 +170,20 @@ export function DriveCard({ storeData, state, setState }: DriveCardProps) {
           ),
         })
 
+        if ((data as any).cached) {
+          toast.info("Showing cached summary.")
+        } else {
+          toast.success(`${fileName} summarized successfully!`)
+        }
+
         return { summary: data.summary, originalText: data.original_text }
       }
     } catch (error) {
-      console.error("Error summarizing file:", error)
+      if (error instanceof ApiError) {
+        toast.error(error.friendlyMessage)
+      } else {
+        toast.error("Error summarizing file.")
+      }
     }
     return null
   }
@@ -185,7 +215,11 @@ export function DriveCard({ storeData, state, setState }: DriveCardProps) {
 
       return data.answer
     } catch (error) {
-      console.error("Error asking question:", error)
+      if (error instanceof ApiError) {
+        toast.error(error.friendlyMessage)
+      } else {
+        toast.error("Error asking question.")
+      }
       return "Error fetching answer."
     }
   }
@@ -196,9 +230,43 @@ export function DriveCard({ storeData, state, setState }: DriveCardProps) {
     return date.toISOString().split("T")[0]
   }
 
+  const isConnected = accounts.length > 0
+
   return (
     <div className="bg-amber-900/15 p-8 rounded-xl shadow-lg border border-white/20 mb-8">
-      <h2 className="text-2xl font-bold mb-4">Google Drive Files</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-bold">Google Drive Files</h2>
+        {isConnected && (
+          <div className="relative">
+            {showDisconnectConfirm ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-300">Disconnect?</span>
+                <Button
+                  onClick={() => { onDisconnect(); setShowDisconnectConfirm(false) }}
+                  className="bg-red-600 hover:bg-red-700 text-xs px-2 py-1"
+                >
+                  Yes
+                </Button>
+                <Button
+                  onClick={() => setShowDisconnectConfirm(false)}
+                  className="bg-gray-600 hover:bg-gray-700 text-xs px-2 py-1"
+                >
+                  No
+                </Button>
+              </div>
+            ) : (
+              <Button
+                onClick={() => setShowDisconnectConfirm(true)}
+                className="bg-red-600/20 hover:bg-red-600/40 border border-red-500/30"
+                title="Disconnect Google Drive"
+              >
+                <Unplug className="w-4 h-4 mr-1" />
+                Disconnect
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="mb-4">
         {accounts.length === 0 ? (
@@ -228,6 +296,10 @@ export function DriveCard({ storeData, state, setState }: DriveCardProps) {
           onAskQuestion={askQuestion}
           onFetchFiles={fetchFilesFromDate}
           getDefaultDate={getDefaultDate}
+          onDateChange={(date) => {
+            const updated = state.accounts.map((a) => a.id === account.id ? { ...a, selectedDate: date } : a)
+            updateState({ accounts: updated })
+          }}
         />
       ))}
     </div>
@@ -236,7 +308,7 @@ export function DriveCard({ storeData, state, setState }: DriveCardProps) {
 
 interface DriveAccountSectionProps {
   account: DriveAccount
-  onSummarize: (fileId: string, fileName: string, mimeType: string, accountId: string) => Promise<any>
+  onSummarize: (fileId: string, fileName: string, mimeType: string, accountId: string, forceRefresh?: boolean) => Promise<any>
   onAskQuestion: (
     query: string,
     originalText: string,
@@ -246,6 +318,7 @@ interface DriveAccountSectionProps {
   ) => Promise<string>
   onFetchFiles: (accountId: string, startDate: string) => Promise<void>
   getDefaultDate: () => string
+  onDateChange?: (date: string) => void
 }
 
 function DriveAccountSection({
@@ -254,16 +327,17 @@ function DriveAccountSection({
   onAskQuestion,
   onFetchFiles,
   getDefaultDate,
+  onDateChange,
 }: DriveAccountSectionProps) {
-  const [selectedDate, setSelectedDate] = useState("")
+  const [selectedDate, setSelectedDate] = useState(account.selectedDate || "")
   const [isLoading, setIsLoading] = useState(false)
   const [loadingFileId, setLoadingFileId] = useState<string | null>(null)
   const [questions, setQuestions] = useState<Record<string, string>>({})
   const [asking, setAsking] = useState<Record<string, boolean>>({})
 
-  const handleSummarize = async (file: DriveFile) => {
+  const handleSummarize = async (file: DriveFile, forceRefresh = false) => {
     setLoadingFileId(file.id)
-    await onSummarize(file.id, file.name, file.mimeType, account.id)
+    await onSummarize(file.id, file.name, file.mimeType, account.id, forceRefresh)
     setLoadingFileId(null)
   }
 
@@ -289,7 +363,7 @@ function DriveAccountSection({
       <h3 className="text-lg font-semibold mb-3">Drive Account: {account.email}</h3>
 
       <div className="mb-6 p-4 bg-blue-900/20 rounded-lg border border-blue-500/30">
-        <h4 className="text-lg font-semibold mb-3 text-blue-300">📅 Select Date Range</h4>
+        <h4 className="text-lg font-semibold mb-3 text-blue-300">Select Date Range</h4>
         <p className="text-sm text-gray-300 mb-3">
           Choose a start date to fetch files modified from that date to today:
         </p>
@@ -303,7 +377,7 @@ function DriveAccountSection({
               type="date"
               id={`date-picker-${account.id}`}
               value={selectedDate || getDefaultDate()}
-              onChange={(e) => setSelectedDate(e.target.value)}
+              onChange={(e) => { setSelectedDate(e.target.value); onDateChange?.(e.target.value) }}
               max={new Date().toISOString().split("T")[0]}
               className="w-full p-2 rounded border text-gray-900"
             />
@@ -350,7 +424,23 @@ function DriveAccountSection({
 
               {account.summaries[file.id] && (
                 <div className="p-4 bg-white/10 rounded-lg">
-                  <h4 className="font-semibold mb-2">File Summary</h4>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-semibold">File Summary</h4>
+                    <div className="flex items-center gap-2">
+                      {account.summaries[file.id].cached && account.summaries[file.id].cachedAt && (
+                        <span className="text-xs bg-blue-600/30 text-blue-300 px-2 py-1 rounded">
+                          Cached {new Date(account.summaries[file.id].cachedAt!).toLocaleDateString()}
+                        </span>
+                      )}
+                      <button
+                        onClick={() => handleSummarize(file, true)}
+                        className="p-1 rounded hover:bg-white/20 transition-colors"
+                        title="Re-summarize (force refresh)"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
                   <p className="whitespace-pre-wrap mb-4">{account.summaries[file.id].summary}</p>
 
                   <div className="flex gap-2 mb-2">

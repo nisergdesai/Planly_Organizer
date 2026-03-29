@@ -21,8 +21,8 @@ venv/
 *.npy
 *.h5
 
-# Microsoft Graph API token
-ms_graph_api_token.json
+# Microsoft Graph API token (now per-account)
+ms_graph_api_token*.json
 
 # === Node/Next.js ===
 # Dependencies
@@ -43,3 +43,21 @@ yarn-error.log*
 
 email_task_classifier_cpu/
 results/
+
+# Credentials and tokens
+credentials.json
+ServiceAccountToken.json
+credentials.ini
+token_*.pickle
+
+# Change staging directories
+functionality-changes/
+high-impact-changes/
+planly-db-changes/
+planly-db-changes.zip
+
+# Debug/test scripts
+backend/debug_web_auth.py
+backend/test_auth.py
+backend/test_flask_endpoints.py
+backend/setup_guide.md

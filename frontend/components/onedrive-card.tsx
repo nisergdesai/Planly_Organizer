@@ -2,14 +2,16 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Loader2 } from "lucide-react"
-import { apiClient } from "@/lib/api"
+import { Loader2, RefreshCw, Unplug } from "lucide-react"
+import { useToast } from "@/lib/toast-context"
+import { apiClient, ApiError } from "@/lib/api"
 import type { DataItem, OnedriveState } from "@/app/page"
 
 interface OnedriveCardProps {
   storeData: (service: string, data: DataItem[]) => void
   state: OnedriveState
   setState: (state: OnedriveState) => void
+  onDisconnect: () => void
 }
 
 interface OnedriveFile {
@@ -24,12 +26,14 @@ interface OnedriveAccount {
   showDatePicker: boolean
   userCode?: string
   verificationUrl?: string
-  summaries: Record<string, { summary: string; originalText: string }>
+  summaries: Record<string, { summary: string; originalText: string; cached?: boolean; cachedAt?: string }>
   answers: Record<string, string>
 }
 
-export function OnedriveCard({ storeData, state, setState }: OnedriveCardProps) {
+export function OnedriveCard({ storeData, state, setState, onDisconnect }: OnedriveCardProps) {
   const { status, account } = state
+  const toast = useToast()
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false)
 
   const updateState = (updates: Partial<OnedriveState>) => {
     setState({ ...state, ...updates })
@@ -47,7 +51,7 @@ export function OnedriveCard({ storeData, state, setState }: OnedriveCardProps) 
 
       if (data.status === "pending" && data.user_code) {
         updateState({
-          status: "User authentication required! ⚠️",
+          status: "User authentication required!",
           account: {
             id: "onedrive_account",
             files: [],
@@ -59,6 +63,7 @@ export function OnedriveCard({ storeData, state, setState }: OnedriveCardProps) 
             answers: {},
           },
         })
+        toast.info("Please authenticate with Microsoft using the code shown.")
       } else if (data.status === "success") {
         updateState({
           status: "Connected ✅ - Please select a date range",
@@ -71,12 +76,18 @@ export function OnedriveCard({ storeData, state, setState }: OnedriveCardProps) 
             answers: {},
           },
         })
+        toast.success("OneDrive connected successfully!")
       } else {
         updateState({ status: "Error connecting ❌" })
+        toast.error("Failed to connect OneDrive.")
       }
     } catch (error) {
       updateState({ status: "Connection Error ❌" })
-      console.error("OneDrive connection error:", error)
+      if (error instanceof ApiError) {
+        toast.error(error.friendlyMessage)
+      } else {
+        toast.error("Unable to connect to server. Please check your connection.")
+      }
     }
   }
 
@@ -133,22 +144,29 @@ export function OnedriveCard({ storeData, state, setState }: OnedriveCardProps) 
           account: null,
         }))
         storeData("onedrive", onedriveData)
+        toast.success("OneDrive files loaded!")
       } else {
         updateState({ status: "Error fetching files ❌" })
+        toast.error("Failed to fetch OneDrive files.")
       }
     } catch (error) {
       updateState({ status: "Error retrieving files ❌" })
-      console.error("Error fetching OneDrive files:", error)
+      if (error instanceof ApiError) {
+        toast.error(error.friendlyMessage)
+      } else {
+        toast.error("Unable to connect to server. Please check your connection.")
+      }
     }
   }
 
-  const summarizeFile = async (fileId: string, fileName: string) => {
+  const summarizeFile = async (fileId: string, fileName: string, forceRefresh = false) => {
     try {
       const formData = new FormData()
       formData.append("file_id", fileId)
       formData.append("file_name", fileName)
       formData.append("file_mime_type", "")
       formData.append("file_source", "onedrive")
+      formData.append("force_refresh", forceRefresh.toString())
 
       const response = await fetch("/api/summarize", {
         method: "POST",
@@ -177,14 +195,26 @@ export function OnedriveCard({ storeData, state, setState }: OnedriveCardProps) 
                   [fileId]: {
                     summary: data.summary,
                     originalText: data.original_text,
+                    cached: data.cached || false,
+                    cachedAt: data.cached_at || null,
                   },
                 },
               }
             : null,
         })
+
+        if (data.cached) {
+          toast.info("Showing cached summary.")
+        } else {
+          toast.success(`${fileName} summarized!`)
+        }
       }
     } catch (error) {
-      console.error("Error summarizing file:", error)
+      if (error instanceof ApiError) {
+        toast.error(error.friendlyMessage)
+      } else {
+        toast.error("Error summarizing file.")
+      }
     }
   }
 
@@ -207,7 +237,11 @@ export function OnedriveCard({ storeData, state, setState }: OnedriveCardProps) 
           : null,
       })
     } catch (error) {
-      console.error("Error with follow-up question:", error)
+      if (error instanceof ApiError) {
+        toast.error(error.friendlyMessage)
+      } else {
+        toast.error("Error with follow-up question.")
+      }
     }
   }
 
@@ -217,9 +251,43 @@ export function OnedriveCard({ storeData, state, setState }: OnedriveCardProps) 
     return date.toISOString().split("T")[0]
   }
 
+  const isConnected = !!account
+
   return (
     <div className="bg-amber-900/15 p-8 rounded-xl shadow-lg border border-white/20 mb-8">
-      <h2 className="text-2xl font-bold mb-4">OneDrive</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-bold">OneDrive</h2>
+        {isConnected && (
+          <div className="relative">
+            {showDisconnectConfirm ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-300">Disconnect?</span>
+                <Button
+                  onClick={() => { onDisconnect(); setShowDisconnectConfirm(false) }}
+                  className="bg-red-600 hover:bg-red-700 text-xs px-2 py-1"
+                >
+                  Yes
+                </Button>
+                <Button
+                  onClick={() => setShowDisconnectConfirm(false)}
+                  className="bg-gray-600 hover:bg-gray-700 text-xs px-2 py-1"
+                >
+                  No
+                </Button>
+              </div>
+            ) : (
+              <Button
+                onClick={() => setShowDisconnectConfirm(true)}
+                className="bg-red-600/20 hover:bg-red-600/40 border border-red-500/30"
+                title="Disconnect OneDrive"
+              >
+                <Unplug className="w-4 h-4 mr-1" />
+                Disconnect
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
 
       {!account && (
         <Button
@@ -247,7 +315,12 @@ export function OnedriveCard({ storeData, state, setState }: OnedriveCardProps) 
       )}
 
       {account?.showDatePicker && (
-        <OnedriveDatePicker onFetchFiles={fetchFilesFromDate} getDefaultDate={getDefaultDate} />
+        <OnedriveDatePicker
+          onFetchFiles={fetchFilesFromDate}
+          getDefaultDate={getDefaultDate}
+          savedDate={state.selectedDate}
+          onDateChange={(date) => updateState({ selectedDate: date })}
+        />
       )}
 
       {account && account.files.length > 0 && (
@@ -266,11 +339,15 @@ export function OnedriveCard({ storeData, state, setState }: OnedriveCardProps) 
 function OnedriveDatePicker({
   onFetchFiles,
   getDefaultDate,
+  savedDate,
+  onDateChange,
 }: {
   onFetchFiles: (startDate: string) => Promise<void>
   getDefaultDate: () => string
+  savedDate?: string
+  onDateChange?: (date: string) => void
 }) {
-  const [selectedDate, setSelectedDate] = useState("")
+  const [selectedDate, setSelectedDate] = useState(savedDate || "")
   const [isLoading, setIsLoading] = useState(false)
 
   const handleDateSubmit = async () => {
@@ -282,7 +359,7 @@ function OnedriveDatePicker({
 
   return (
     <div className="mb-6 p-4 bg-blue-900/20 rounded-lg border border-blue-500/30">
-      <h4 className="text-lg font-semibold mb-3 text-blue-300">📅 Select Date Range</h4>
+      <h4 className="text-lg font-semibold mb-3 text-blue-300">Select Date Range</h4>
       <p className="text-sm text-gray-300 mb-3">
         Choose a start date to fetch files modified from that date to today:
       </p>
@@ -296,7 +373,7 @@ function OnedriveDatePicker({
             type="date"
             id="onedrive-date-picker"
             value={selectedDate || getDefaultDate()}
-            onChange={(e) => setSelectedDate(e.target.value)}
+            onChange={(e) => { setSelectedDate(e.target.value); onDateChange?.(e.target.value) }}
             max={new Date().toISOString().split("T")[0]}
             className="w-full p-2 rounded border text-gray-900"
           />
@@ -321,18 +398,18 @@ function OnedriveFileList({
   onAsk,
 }: {
   files: OnedriveFile[]
-  summaries: Record<string, { summary: string; originalText: string }>
+  summaries: Record<string, { summary: string; originalText: string; cached?: boolean; cachedAt?: string }>
   answers: Record<string, string>
-  onSummarize: (fileId: string, fileName: string) => Promise<void>
+  onSummarize: (fileId: string, fileName: string, forceRefresh?: boolean) => Promise<void>
   onAsk: (fileId: string, question: string) => Promise<void>
 }) {
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [questions, setQuestions] = useState<Record<string, string>>({})
   const [askingId, setAskingId] = useState<string | null>(null)
 
-  const handleSummarize = async (file: OnedriveFile) => {
+  const handleSummarize = async (file: OnedriveFile, forceRefresh = false) => {
     setLoadingId(file.id)
-    await onSummarize(file.id, file.name)
+    await onSummarize(file.id, file.name, forceRefresh)
     setLoadingId(null)
   }
 
@@ -361,7 +438,23 @@ function OnedriveFileList({
 
           {summaries[file.id] && (
             <div className="p-4 bg-white/10 rounded-lg">
-              <h4 className="font-semibold mb-2">File Summary</h4>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-semibold">File Summary</h4>
+                <div className="flex items-center gap-2">
+                  {summaries[file.id].cached && summaries[file.id].cachedAt && (
+                    <span className="text-xs bg-blue-600/30 text-blue-300 px-2 py-1 rounded">
+                      Cached {new Date(summaries[file.id].cachedAt!).toLocaleDateString()}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => handleSummarize(file, true)}
+                    className="p-1 rounded hover:bg-white/20 transition-colors"
+                    title="Re-summarize (force refresh)"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
               <p className="whitespace-pre-wrap mb-4">{summaries[file.id].summary}</p>
 
               <div className="flex gap-2 mb-2">

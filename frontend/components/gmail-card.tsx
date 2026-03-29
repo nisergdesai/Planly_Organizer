@@ -2,8 +2,11 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
+import { RefreshCw, Unplug } from "lucide-react"
+import { useToast } from "@/lib/toast-context"
 import {
   apiClient,
+  ApiError,
   type GmailLabel,
   type GmailEmail,
   type GmailConnectResponse,
@@ -16,6 +19,7 @@ interface GmailCardProps {
   storeData: (service: string, data: DataItem[]) => void
   state: GmailState
   setState: React.Dispatch<React.SetStateAction<GmailState>>
+  onDisconnect: () => void
 }
 
 interface GmailAccount {
@@ -26,17 +30,21 @@ interface GmailAccount {
   isConnected: boolean
   showDatePicker: boolean
   summary?: string
+  summaryCached?: boolean
+  summaryCachedAt?: string
 }
 
-export function GmailCard({ storeData, state, setState }: GmailCardProps) {
+export function GmailCard({ storeData, state, setState, onDisconnect }: GmailCardProps) {
   const { status, accounts, connectedCount } = state
+  const toast = useToast()
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false)
 
   const updateState = (updates: Partial<GmailState>) => {
     setState((prev) => ({ ...prev, ...updates }))
   }
 
   const connectGmail = async (isAdditional = false) => {
-    updateState({ status: "Connecting Gmail... \u23F3" })
+    updateState({ status: "Connecting Gmail... ⏳" })
 
     try {
       const accountId = `gmail_${Date.now()}`
@@ -64,10 +72,12 @@ export function GmailCard({ storeData, state, setState }: GmailCardProps) {
 
         setState((prev) => ({
           ...prev,
-          status: "Connected \u2705 - Please select a date range",
+          status: "Connected ✅ - Please select a date range",
           connectedCount: prev.connectedCount + 1,
           accounts: [...prev.accounts, newAccount],
         }))
+
+        toast.success("Gmail connected successfully!")
 
         try {
           const labelsData: GmailLabelsResponse = await apiClient.getGmailLabels(newAccount.id)
@@ -80,19 +90,26 @@ export function GmailCard({ storeData, state, setState }: GmailCardProps) {
             }))
           }
         } catch (err) {
-          console.error("Error fetching labels:", err)
+          if (err instanceof ApiError) {
+            toast.warning(err.friendlyMessage)
+          }
         }
       } else {
-        updateState({ status: "Connection Failed \u274C" })
+        updateState({ status: "Connection Failed ❌" })
+        toast.error("Failed to connect Gmail.")
       }
     } catch (error) {
-      updateState({ status: "Connection Error \u274C" })
-      console.error("Gmail connection error:", error)
+      updateState({ status: "Connection Error ❌" })
+      if (error instanceof ApiError) {
+        toast.error(error.friendlyMessage)
+      } else {
+        toast.error("Unable to connect to server. Please check your connection.")
+      }
     }
   }
 
   const fetchEmailsFromDate = async (accountId: string, startDate: string, labelId = "INBOX") => {
-    updateState({ status: "Fetching emails... \u23F3" })
+    updateState({ status: "Fetching emails... ⏳" })
 
     try {
       const selectedDate = new Date(startDate)
@@ -118,22 +135,28 @@ export function GmailCard({ storeData, state, setState }: GmailCardProps) {
 
           return {
             ...prev,
-            status: "Emails loaded \u2705",
+            status: "Emails loaded ✅",
             accounts: updatedAccounts,
           }
         })
+        toast.success("Emails loaded successfully!")
       } else {
-        updateState({ status: "Failed to fetch emails \u274C" })
+        updateState({ status: "Failed to fetch emails ❌" })
+        toast.error("Failed to fetch emails.")
       }
     } catch (error) {
-      updateState({ status: "Error fetching emails \u274C" })
-      console.error("Error fetching emails:", error)
+      updateState({ status: "Error fetching emails ❌" })
+      if (error instanceof ApiError) {
+        toast.error(error.friendlyMessage)
+      } else {
+        toast.error("Unable to connect to server. Please check your connection.")
+      }
     }
   }
 
-  const summarizeEmails = async (accountId: string, selectedEmails: string[]) => {
+  const summarizeEmails = async (accountId: string, selectedEmails: string[], forceRefresh = false) => {
     try {
-      const data: SummarizeResponse = await apiClient.summarizeEmails(selectedEmails, accountId)
+      const data = await apiClient.summarizeEmails(selectedEmails, accountId, forceRefresh) as any
 
       if (data.summary) {
         const account = accounts.find((acc: GmailAccount) => acc.id === accountId)
@@ -150,14 +173,29 @@ export function GmailCard({ storeData, state, setState }: GmailCardProps) {
         setState((prev) => ({
           ...prev,
           accounts: prev.accounts.map((acc) =>
-            acc.id === accountId ? { ...acc, summary: data.summary } : acc
+            acc.id === accountId ? {
+              ...acc,
+              summary: data.summary,
+              summaryCached: data.cached || false,
+              summaryCachedAt: data.cached_at || null,
+            } : acc
           ),
         }))
+
+        if (data.cached) {
+          toast.info("Showing cached summary.")
+        } else {
+          toast.success("Emails summarized successfully!")
+        }
 
         return data.summary
       }
     } catch (error) {
-      console.error("Error summarizing emails:", error)
+      if (error instanceof ApiError) {
+        toast.error(error.friendlyMessage)
+      } else {
+        toast.error("Error summarizing emails.")
+      }
     }
     return null
   }
@@ -182,13 +220,51 @@ export function GmailCard({ storeData, state, setState }: GmailCardProps) {
         storeData("gmail", gmailData)
       }
     } catch (error) {
-      console.error("Error refreshing Gmail emails:", error)
+      if (error instanceof ApiError) {
+        toast.error(error.friendlyMessage)
+      } else {
+        toast.error("Error refreshing emails.")
+      }
     }
   }
 
+  const isConnected = accounts.length > 0
+
   return (
     <div className="bg-amber-900/15 p-8 rounded-xl shadow-lg border border-white/20 mb-8">
-      <h2 className="text-2xl font-bold mb-4">Gmail Emails</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-bold">Gmail Emails</h2>
+        {isConnected && (
+          <div className="relative">
+            {showDisconnectConfirm ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-300">Disconnect?</span>
+                <Button
+                  onClick={() => { onDisconnect(); setShowDisconnectConfirm(false) }}
+                  className="bg-red-600 hover:bg-red-700 text-xs px-2 py-1"
+                >
+                  Yes
+                </Button>
+                <Button
+                  onClick={() => setShowDisconnectConfirm(false)}
+                  className="bg-gray-600 hover:bg-gray-700 text-xs px-2 py-1"
+                >
+                  No
+                </Button>
+              </div>
+            ) : (
+              <Button
+                onClick={() => setShowDisconnectConfirm(true)}
+                className="bg-red-600/20 hover:bg-red-600/40 border border-red-500/30"
+                title="Disconnect Gmail"
+              >
+                <Unplug className="w-4 h-4 mr-1" />
+                Disconnect
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="mb-4">
         {accounts.length === 0 ? (
@@ -227,7 +303,7 @@ export function GmailCard({ storeData, state, setState }: GmailCardProps) {
 
 interface GmailAccountSectionProps {
   account: GmailAccount
-  onSummarize: (accountId: string, selectedEmails: string[]) => Promise<string | null>
+  onSummarize: (accountId: string, selectedEmails: string[], forceRefresh?: boolean) => Promise<string | null>
   onRefresh: (accountId: string, labelId: string) => Promise<void>
   onFetchEmails: (accountId: string, startDate: string, labelId?: string) => Promise<void>
   accounts: GmailAccount[]
@@ -245,12 +321,19 @@ function GmailAccountSection({
   const [selectedEmails, setSelectedEmails] = useState<string[]>([])
   const [selectedLabel, setSelectedLabel] = useState("INBOX")
   const [isLoading, setIsLoading] = useState(false)
-  const [selectedDate, setSelectedDate] = useState("")
+  const [selectedDate, setSelectedDate] = useState(account.selectedDate || "")
 
   const getDefaultDate = () => {
     const date = new Date()
     date.setDate(date.getDate() - 7)
     return date.toISOString().split("T")[0]
+  }
+
+  // Persist date selection to parent state
+  const handleDateChange = (value: string) => {
+    setSelectedDate(value)
+    const updated = accounts.map((a) => a.id === account.id ? { ...a, selectedDate: value } : a)
+    updateAccounts(updated)
   }
 
   const handleEmailSelect = (emailId: string, checked: boolean) => {
@@ -259,10 +342,10 @@ function GmailAccountSection({
     )
   }
 
-  const handleSummarize = async () => {
+  const handleSummarize = async (forceRefresh = false) => {
     if (selectedEmails.length === 0) return
     setIsLoading(true)
-    await onSummarize(account.id, selectedEmails)
+    await onSummarize(account.id, selectedEmails, forceRefresh)
     setIsLoading(false)
   }
 
@@ -308,7 +391,7 @@ function GmailAccountSection({
       </div>
 
       <div className="mb-6 p-4 bg-blue-900/20 rounded-lg border border-blue-500/30">
-        <h4 className="text-lg font-semibold mb-3 text-blue-300">\ud83d\uddd3\ufe0f Select Date Range</h4>
+        <h4 className="text-lg font-semibold mb-3 text-blue-300">Select Date Range</h4>
         <p className="text-sm text-gray-300 mb-3">
           Choose a start date to fetch emails from that date to today:
         </p>
@@ -322,7 +405,7 @@ function GmailAccountSection({
               type="date"
               id={`date-picker-${account.id}`}
               value={selectedDate || getDefaultDate()}
-              onChange={(e) => setSelectedDate(e.target.value)}
+              onChange={(e) => handleDateChange(e.target.value)}
               max={new Date().toISOString().split("T")[0]}
               className="w-full p-2 rounded border text-gray-900"
             />
@@ -374,7 +457,7 @@ function GmailAccountSection({
 
       {selectedEmails.length > 0 && (
         <Button
-          onClick={handleSummarize}
+          onClick={() => handleSummarize(false)}
           disabled={isLoading}
           className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700 mb-4"
         >
@@ -384,7 +467,23 @@ function GmailAccountSection({
 
       {account.summary && (
         <div className="mt-4 p-4 bg-white/10 rounded-lg">
-          <h4 className="font-semibold mb-2">Summary</h4>
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="font-semibold">Summary</h4>
+            <div className="flex items-center gap-2">
+              {account.summaryCached && account.summaryCachedAt && (
+                <span className="text-xs bg-blue-600/30 text-blue-300 px-2 py-1 rounded">
+                  Cached {new Date(account.summaryCachedAt).toLocaleDateString()}
+                </span>
+              )}
+              <button
+                onClick={() => handleSummarize(true)}
+                className="p-1 rounded hover:bg-white/20 transition-colors"
+                title="Re-summarize (force refresh)"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
           <p className="whitespace-pre-wrap">{account.summary}</p>
         </div>
       )}

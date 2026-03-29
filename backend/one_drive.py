@@ -6,18 +6,23 @@ import tempfile
 from io import BytesIO
 from PyPDF2 import PdfReader
 from docx import Document
-from configparser import ConfigParser
+import openpyxl
 from google import genai
 from google.genai import types
-import whisper
+try:
+    import whisper
+except ImportError:
+    whisper = None
+    print("Warning: whisper not installed — audio/video transcription will be unavailable")
 from datetime import datetime, timedelta
 import time
 import json
+from config import Config
 
 def summarize_content_with_gemini(content):
-    client = genai.Client(api_key="AIzaSyBrl4OwWlUfGzNjwo2brjNj73Z7jXop1oc")
+    client = genai.Client(api_key=Config.GEMINI_API_KEY)
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash",
         contents=['summarize', content],
         config=types.GenerateContentConfig(
         safety_settings=[
@@ -79,18 +84,15 @@ def retry_with_backoff(func, max_retries=5, backoff_factor=2, **kwargs):
     raise Exception(f"Failed after {max_retries} retries.")
 
 
-model = whisper.load_model("base")  # Use "base", "tiny", "large", etc., based on your needs.
+# Lazy-load Whisper model to avoid import-time delay
+_whisper_model = None
 
-# Configure Google Gemini API
-config = ConfigParser()
-config.read('credentials.ini')
-api_key = config['API_KEY']['google_api_key']
+def _get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        _whisper_model = whisper.load_model("base")
+    return _whisper_model
 
-# Configure Google Gemini with API Key
-#genai.configure(api_key=api_key)
-
-# Select the appropriate model for summarization
-#model_gemini_pro = genai.GenerativeModel('gemini-pro')
 
 def fetch_onenote_notebooks(access_token):
     """
@@ -254,20 +256,17 @@ def get_onedrive_file_content(headers, file_id, file_name, access_token, cutoff_
     response = retry_with_backoff(requests.get, url=file_metadata_url, headers=headers)
     if response.status_code != 200:
         print(f"Failed to fetch file metadata. Status Code: {response.status_code}, Error: {response.text}")
-        return None
+        return "", f"Failed to fetch file metadata (HTTP {response.status_code})"
 
     file_metadata = response.json()
     last_modified_str = file_metadata.get("lastModifiedDateTime", "Unknown")
     last_modified = datetime.fromisoformat(last_modified_str[:-1])  # Remove 'Z' for parsing
 
-    '''if last_modified < cutoff_date:
-        return None
-'''
     # Fetch file content with retry logic
     response = retry_with_backoff(requests.get, url=url, headers=headers)
     if response.status_code != 200:
         print(f"Failed to fetch file content. Status Code: {response.status_code}, Error: {response.text}")
-        return None
+        return "", f"Failed to fetch file content (HTTP {response.status_code})"
     
     file_content = response.content
     extracted_text = ""
@@ -275,6 +274,7 @@ def get_onedrive_file_content(headers, file_id, file_name, access_token, cutoff_
     # Process audio files using Whisper
     if file_extension in [".mp3", ".wav", ".m4a", ".flac", ".mov"]:
         try:
+            model = _get_whisper_model()
             with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_audio:
                 temp_audio.write(file_content)
                 temp_audio_path = temp_audio.name
@@ -284,7 +284,7 @@ def get_onedrive_file_content(headers, file_id, file_name, access_token, cutoff_
             os.remove(temp_audio_path)
         except Exception as e:
             print(f"Error transcribing audio file {file_name}: {e}")
-            return None
+            return "", f"Error transcribing audio file: {e}"
 
     elif file_extension == ".pdf":
         try:
@@ -299,7 +299,7 @@ def get_onedrive_file_content(headers, file_id, file_name, access_token, cutoff_
             os.remove(temp_file_path)
         except Exception as e:
             print(f"Error reading PDF file {file_name}: {e}")
-            return None
+            return "", f"Error reading PDF file: {e}"
 
     elif file_extension == ".docx":
         try:
@@ -307,14 +307,57 @@ def get_onedrive_file_content(headers, file_id, file_name, access_token, cutoff_
             extracted_text = "\n".join(para.text for para in doc.paragraphs)
         except Exception as e:
             print(f"Error reading DOCX file {file_name}: {e}")
-            return None
+            return "", f"Error reading Word file: {e}"
 
     elif file_extension == ".txt":
         try:
             extracted_text = file_content.decode('utf-8')
         except Exception as e:
             print(f"Error reading TXT file {file_name}: {e}")
-            return None
+            return "", f"Error reading text file: {e}"
+
+    elif file_extension in [".xlsx", ".xls"]:
+        try:
+            wb = openpyxl.load_workbook(BytesIO(file_content), read_only=True, data_only=True)
+            sheets_text = []
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                rows = []
+                for row in ws.iter_rows(values_only=True):
+                    row_text = "\t".join(str(cell) if cell is not None else "" for cell in row)
+                    if row_text.strip():
+                        rows.append(row_text)
+                if rows:
+                    sheets_text.append(f"--- Sheet: {sheet_name} ---\n" + "\n".join(rows))
+            wb.close()
+            extracted_text = "\n\n".join(sheets_text)
+        except Exception as e:
+            print(f"Error reading Excel file {file_name}: {e}")
+            return "", f"Error reading Excel file: {e}"
+
+    elif file_extension == ".csv":
+        try:
+            extracted_text = file_content.decode('utf-8')
+        except Exception as e:
+            print(f"Error reading CSV file {file_name}: {e}")
+            return "", f"Error reading CSV file: {e}"
+
+    elif file_extension in [".pptx"]:
+        try:
+            from pptx import Presentation
+            prs = Presentation(BytesIO(file_content))
+            slides_text = []
+            for i, slide in enumerate(prs.slides):
+                texts = []
+                for shape in slide.shapes:
+                    if hasattr(shape, 'text') and shape.text.strip():
+                        texts.append(shape.text)
+                if texts:
+                    slides_text.append(f"--- Slide {i+1} ---\n" + "\n".join(texts))
+            extracted_text = "\n\n".join(slides_text)
+        except Exception as e:
+            print(f"Error reading PPTX file {file_name}: {e}")
+            return "", f"Error reading PowerPoint file: {e}"
 
     elif file_extension == ".one":
         try:
@@ -322,10 +365,10 @@ def get_onedrive_file_content(headers, file_id, file_name, access_token, cutoff_
             extracted_text = "\n".join(page['content'] for page in onenote_content)
         except Exception as e:
             print(f"Error extracting OneNote content from file {file_name}: {e}")
-            return None
+            return "", f"Error reading OneNote file: {e}"
 
     if not extracted_text.strip():
-        return None  # Skip empty files
+        return "", "No readable text content found in this file."  # Return empty tuple instead of None
 
     # Summarize extracted content
     summary = summarize_content_with_gemini(extracted_text)
@@ -410,21 +453,3 @@ def format_combined_content(content_list):
         for entry in content_list
     )
     return formatted_output
-
-if __name__ == '__main__':
-    APP_ID = 'edf0be76-049c-4130-aa48-cad3cd75a2c9'
-    SCOPES = ['Mail.Read', 'Files.Read', 'Notes.Read']
-
-    #access_token = generate_access_token(app_id=APP_ID, scopes=SCOPES)
-    with open("ms_graph_api_token.json", "r") as file:
-        data = json.load(file)
-        access_token = list(data["AccessToken"].values())[0]["secret"]
-    headers = {'Authorization': 'Bearer ' + access_token}
-    #headers = {
-     #   'Authorization': 'Bearer ' + access_token['access_token']
-    #}
-
-    # Navigate OneDrive and extract content
-    print(navigate_onedrive(headers, access_token, 40))
-    #formatted = format_combined_content(combined_content)
-    #print(summarize_content_with_gemini(formatted))

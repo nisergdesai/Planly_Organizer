@@ -2,18 +2,21 @@ import requests
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from predict import predict_sentences, predict_sentences_action_notes
+from config import Config
 
-API_TOKEN = "9270~QaCLa7hHeXUhAUXHhVuZMaNuVavxra2HP9FtN46eWTfX4AEBVym4V6Cn2P82MuYc"
-CANVAS_BASE_URL = "https://canvas.ucsc.edu"
-HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
+CANVAS_BASE_URL = Config.CANVAS_BASE_URL
+HEADERS = {"Authorization": f"Bearer {Config.CANVAS_API_TOKEN}"}
+
 
 def get_active_courses():
     url = f"{CANVAS_BASE_URL}/api/v1/courses?include[]=syllabus_body&enrollment_state=past"
     response = requests.get(url, headers=HEADERS)
     return response.json() if response.status_code == 200 else []
 
+
 def contains_english_text(text):
     return any(char.isalpha() for char in text)
+
 
 def summarize_text(text):
     if not text.strip():
@@ -21,13 +24,14 @@ def summarize_text(text):
     summary = predict_sentences_action_notes(text)
     return summary if contains_english_text(summary) else predict_sentences_action_notes(text)
 
+
 def get_syllabus(course):
     course_name = course.get("name", "Unknown Course")
     syllabus = course.get("syllabus_body", "No syllabus available.")
     syllabus_text = BeautifulSoup(syllabus, "html.parser").get_text() if syllabus else "No syllabus available."
-    
-    # Returning formatted HTML
+
     return f"<h4><strong>Syllabus Summary - {course_name}</strong></h4><p>{summarize_text(syllabus_text)}</p>"
+
 
 def get_upcoming_assignments(course):
     """Retrieve and summarize upcoming assignments for a given course."""
@@ -43,7 +47,6 @@ def get_upcoming_assignments(course):
     if not assignments:
         return f"<p><strong>No upcoming assignments for {course_name}.</strong></p>"
 
-    # Sort assignments by due date
     assignments.sort(key=lambda x: x.get("due_at", "") or "")
 
     result = f"<h4><strong>Upcoming Assignments - {course_name}</strong></h4>"
@@ -54,8 +57,6 @@ def get_upcoming_assignments(course):
         description = assignment.get("description") or "No description available."
         description_clean = BeautifulSoup(description, "html.parser").get_text().strip()
 
-
-        # Convert due date to readable format
         if due_date:
             try:
                 due_date = datetime.fromisoformat(due_date.replace("Z", "+00:00")).strftime("%A, %B %d, %Y at %I:%M %p")
@@ -70,37 +71,38 @@ def get_upcoming_assignments(course):
     result += "</ul>"
     return result
 
+
 def get_recent_announcements(course):
     course_name = course.get("name", "Unknown Course")
     course_id = course["id"]
-    
+
     today = datetime.today()
     start_date = (today - timedelta(days=365)).strftime('%Y-%m-%d')
     end_date = today.strftime('%Y-%m-%d')
-    
+
     url = f"{CANVAS_BASE_URL}/api/v1/announcements?context_codes[]=course_{course_id}&start_date={start_date}&end_date={end_date}"
     response = requests.get(url, headers=HEADERS)
 
     if response.status_code != 200:
         return f"<p><strong>No recent announcements for {course_name}.</strong></p>"
-    
+
     announcements = response.json()
     if not announcements:
         return f"<p><strong>No new announcements for {course_name} in the last 7 days.</strong></p>"
 
     result = f"<h4><strong>Recent Announcements - {course_name} (Last 7 Days)</strong></h4>"
     result += "<ul style='list-style-type: none; padding: 0;'>"
-    
+
     for ann in announcements:
         title = ann.get('title', 'No title')
         posted_at = ann.get('posted_at')
-        sender = ann.get('author', {}).get('display_name', 'Unknown Sender')  # Get sender name
+        sender = ann.get('author', {}).get('display_name', 'Unknown Sender')
 
         if posted_at:
             posted_at = datetime.fromisoformat(posted_at.replace("Z", "+00:00")).strftime("%A, %B %d, %Y at %I:%M %p")
         else:
-            posted_at = "Date not available"        
-        
+            posted_at = "Date not available"
+
         message = ann.get('message') or 'No message'
         message_clean = BeautifulSoup(message, "html.parser").get_text()
 
@@ -119,15 +121,11 @@ def get_recent_announcements(course):
 def generate_course_overview():
     courses = get_active_courses()
     overview = ""
-    
+
     for course in courses:
         overview += get_syllabus(course)
         overview += get_upcoming_assignments(course)
         overview += get_recent_announcements(course)
-        overview += "<hr>"  # Horizontal line to separate each course section
-    
-    return overview
+        overview += "<hr>"
 
-# Generate and display the formatted course overview
-course_overview = generate_course_overview()
-#print(course_overview)
+    return overview

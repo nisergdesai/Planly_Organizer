@@ -2,12 +2,16 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
+import { RefreshCw, Unplug } from "lucide-react"
+import { useToast } from "@/lib/toast-context"
+import { ApiError } from "@/lib/api"
 import type { DataItem, OutlookState } from "@/app/page"
 
 interface OutlookCardProps {
   storeData: (service: string, data: DataItem[]) => void
   state: OutlookState
   setState: (state: OutlookState) => void
+  onDisconnect: () => void
 }
 
 interface OutlookEmail {
@@ -27,10 +31,14 @@ interface OutlookAccount {
   userCode?: string
   verificationUrl?: string
   summary?: string
+  summaryCached?: boolean
+  summaryCachedAt?: string
 }
 
-export function OutlookCard({ storeData, state, setState }: OutlookCardProps) {
+export function OutlookCard({ storeData, state, setState, onDisconnect }: OutlookCardProps) {
   const { status, account } = state
+  const toast = useToast()
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false)
 
   const updateState = (updates: Partial<OutlookState>) => {
     setState({ ...state, ...updates })
@@ -48,16 +56,17 @@ export function OutlookCard({ storeData, state, setState }: OutlookCardProps) {
 
       if (data.status === "pending" && data.user_code) {
         updateState({
-          status: "User authentication required! ⚠️",
+          status: "User authentication required!",
           account: {
             id: "outlook_account",
             emails: [],
             isConnected: false,
-            showDatePicker: true, // always show date picker even before auth
+            showDatePicker: true,
             userCode: data.user_code,
             verificationUrl: data.verification_url,
           },
         })
+        toast.info("Please authenticate with Microsoft using the code shown.")
       } else if (data.status === "success") {
         updateState({
           status: "Connected ✅ - Please select a date range",
@@ -68,12 +77,18 @@ export function OutlookCard({ storeData, state, setState }: OutlookCardProps) {
             showDatePicker: true,
           },
         })
+        toast.success("Outlook connected successfully!")
       } else {
         updateState({ status: "Error connecting ❌" })
+        toast.error("Failed to connect Outlook.")
       }
     } catch (error) {
       updateState({ status: "Connection Error ❌" })
-      console.error("Outlook connection error:", error)
+      if (error instanceof ApiError) {
+        toast.error(error.friendlyMessage)
+      } else {
+        toast.error("Unable to connect to server. Please check your connection.")
+      }
     }
   }
 
@@ -114,13 +129,12 @@ export function OutlookCard({ storeData, state, setState }: OutlookCardProps) {
             ? {
                 ...account,
                 emails: data.outlooks || [],
-                showDatePicker: true, // keep date picker always visible
-                summary: undefined, // clear previous summary when new emails load
+                showDatePicker: true,
+                summary: undefined,
               }
             : null,
         })
 
-        // Store emails globally
         const outlookData: DataItem[] = data.outlooks.map((email: OutlookEmail) => ({
           service: "outlook",
           text: `${email.sender}: ${email.subject} (${email.date})`,
@@ -128,12 +142,18 @@ export function OutlookCard({ storeData, state, setState }: OutlookCardProps) {
           account: null,
         }))
         storeData("outlook", outlookData)
+        toast.success("Outlook emails loaded!")
       } else {
         updateState({ status: "Error fetching emails ❌" })
+        toast.error("Failed to fetch Outlook emails.")
       }
     } catch (error) {
       updateState({ status: "Error retrieving emails ❌" })
-      console.error("Error fetching Outlook emails:", error)
+      if (error instanceof ApiError) {
+        toast.error(error.friendlyMessage)
+      } else {
+        toast.error("Unable to connect to server. Please check your connection.")
+      }
     }
   }
 
@@ -144,7 +164,7 @@ export function OutlookCard({ storeData, state, setState }: OutlookCardProps) {
     setSelectedEmails((prev) => (checked ? [...prev, emailId] : prev.filter((id) => id !== emailId)))
   }
 
-  const summarizeSelected = async () => {
+  const summarizeSelected = async (forceRefresh = false) => {
     if (selectedEmails.length === 0) return
     setIsLoading(true)
 
@@ -152,23 +172,23 @@ export function OutlookCard({ storeData, state, setState }: OutlookCardProps) {
       const response = await fetch("/api/summarize_outlook_emails", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email_ids: selectedEmails }),
+        body: JSON.stringify({ email_ids: selectedEmails, force_refresh: forceRefresh }),
       })
 
       const data = await response.json()
 
       if (data.summary) {
-        // Update account with summary
         updateState({
           account: account
             ? {
                 ...account,
                 summary: data.summary,
+                summaryCached: data.cached || false,
+                summaryCachedAt: data.cached_at || null,
               }
             : null,
         })
 
-        // Store summary globally for persistence
         const summaryData: DataItem[] = [
           {
             service: "outlook",
@@ -178,24 +198,67 @@ export function OutlookCard({ storeData, state, setState }: OutlookCardProps) {
           },
         ]
         storeData("outlook", summaryData)
+
+        if (data.cached) {
+          toast.info("Showing cached summary.")
+        } else {
+          toast.success("Outlook emails summarized!")
+        }
       }
     } catch (error) {
-      console.error("Error summarizing Outlook emails:", error)
+      if (error instanceof ApiError) {
+        toast.error(error.friendlyMessage)
+      } else {
+        toast.error("Error summarizing Outlook emails.")
+      }
     }
 
     setIsLoading(false)
   }
 
-  // Default date for date picker
   const getDefaultDate = () => {
     const date = new Date()
     date.setDate(date.getDate() - 7)
     return date.toISOString().split("T")[0]
   }
 
+  const isConnected = !!account
+
   return (
     <div className="bg-amber-900/15 p-8 rounded-xl shadow-lg border border-white/20 mb-8">
-      <h2 className="text-2xl font-bold mb-4">Outlook</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-bold">Outlook</h2>
+        {isConnected && (
+          <div className="relative">
+            {showDisconnectConfirm ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-300">Disconnect?</span>
+                <Button
+                  onClick={() => { onDisconnect(); setShowDisconnectConfirm(false) }}
+                  className="bg-red-600 hover:bg-red-700 text-xs px-2 py-1"
+                >
+                  Yes
+                </Button>
+                <Button
+                  onClick={() => setShowDisconnectConfirm(false)}
+                  className="bg-gray-600 hover:bg-gray-700 text-xs px-2 py-1"
+                >
+                  No
+                </Button>
+              </div>
+            ) : (
+              <Button
+                onClick={() => setShowDisconnectConfirm(true)}
+                className="bg-red-600/20 hover:bg-red-600/40 border border-red-500/30"
+                title="Disconnect Outlook"
+              >
+                <Unplug className="w-4 h-4 mr-1" />
+                Disconnect
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
 
       {!account && (
         <Button
@@ -222,9 +285,13 @@ export function OutlookCard({ storeData, state, setState }: OutlookCardProps) {
         </div>
       )}
 
-      {/* Always show date picker */}
       {account?.showDatePicker && (
-        <OutlookDatePicker onFetchEmails={fetchEmailsFromDate} getDefaultDate={getDefaultDate} />
+        <OutlookDatePicker
+          onFetchEmails={fetchEmailsFromDate}
+          getDefaultDate={getDefaultDate}
+          savedDate={state.selectedDate}
+          onDateChange={(date) => updateState({ selectedDate: date })}
+        />
       )}
 
       {account && account.emails.length > 0 && (
@@ -233,13 +300,28 @@ export function OutlookCard({ storeData, state, setState }: OutlookCardProps) {
             emails={account.emails}
             selectedEmails={selectedEmails}
             onEmailSelect={handleEmailSelect}
-            onSummarize={summarizeSelected}
+            onSummarize={() => summarizeSelected(false)}
             isLoading={isLoading}
           />
-          {/* Show summary if present */}
           {account.summary && (
             <div className="mt-4 p-4 bg-white/10 rounded-lg">
-              <h4 className="font-semibold mb-2">Summary</h4>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-semibold">Summary</h4>
+                <div className="flex items-center gap-2">
+                  {account.summaryCached && account.summaryCachedAt && (
+                    <span className="text-xs bg-blue-600/30 text-blue-300 px-2 py-1 rounded">
+                      Cached {new Date(account.summaryCachedAt).toLocaleDateString()}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => summarizeSelected(true)}
+                    className="p-1 rounded hover:bg-white/20 transition-colors"
+                    title="Re-summarize (force refresh)"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
               <p className="whitespace-pre-wrap">{account.summary}</p>
             </div>
           )}
@@ -252,10 +334,12 @@ export function OutlookCard({ storeData, state, setState }: OutlookCardProps) {
 interface OutlookDatePickerProps {
   onFetchEmails: (startDate: string) => Promise<void>
   getDefaultDate: () => string
+  savedDate?: string
+  onDateChange?: (date: string) => void
 }
 
-function OutlookDatePicker({ onFetchEmails, getDefaultDate }: OutlookDatePickerProps) {
-  const [selectedDate, setSelectedDate] = useState("")
+function OutlookDatePicker({ onFetchEmails, getDefaultDate, savedDate, onDateChange }: OutlookDatePickerProps) {
+  const [selectedDate, setSelectedDate] = useState(savedDate || "")
   const [isLoading, setIsLoading] = useState(false)
 
   const handleDateSubmit = async () => {
@@ -267,7 +351,7 @@ function OutlookDatePicker({ onFetchEmails, getDefaultDate }: OutlookDatePickerP
 
   return (
     <div className="mb-6 p-4 bg-blue-900/20 rounded-lg border border-blue-500/30">
-      <h4 className="text-lg font-semibold mb-3 text-blue-300">📅 Select Date Range</h4>
+      <h4 className="text-lg font-semibold mb-3 text-blue-300">Select Date Range</h4>
       <p className="text-sm text-gray-300 mb-3">Choose a start date to fetch emails from that date to today:</p>
 
       <div className="flex gap-3 items-end">
@@ -279,7 +363,7 @@ function OutlookDatePicker({ onFetchEmails, getDefaultDate }: OutlookDatePickerP
             type="date"
             id="outlook-date-picker"
             value={selectedDate || getDefaultDate()}
-            onChange={(e) => setSelectedDate(e.target.value)}
+            onChange={(e) => { setSelectedDate(e.target.value); onDateChange?.(e.target.value) }}
             max={new Date().toISOString().split("T")[0]}
             className="w-full p-2 rounded border text-gray-900"
           />

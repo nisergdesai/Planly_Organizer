@@ -27,6 +27,8 @@ export interface GmailLabelsResponse {
 export interface SummarizeResponse {
   status: string
   summary: string
+  cached?: boolean
+  cached_at?: string
 }
 
 // API utility functions for backend communication
@@ -54,11 +56,68 @@ export interface SummarizeFileResponse {
   status: string
   summary: string
   original_text: string
+  cached?: boolean
+  cached_at?: string
 }
 
 export interface GeminiResponse {
   status: string
   answer: string
+}
+
+export interface ConnectedService {
+  service_type: string
+  account_email: string | null
+  account_id: string | null
+  connected_at: string | null
+}
+
+// ApiError class with friendly messages
+export class ApiError extends Error {
+  status: number
+  friendlyMessage: string
+
+  constructor(status: number, originalMessage: string) {
+    super(originalMessage)
+    this.status = status
+    this.name = "ApiError"
+
+    // Map HTTP status codes to friendly messages
+    switch (status) {
+      case 401:
+      case 403:
+        this.friendlyMessage = "Authentication expired. Please reconnect the service."
+        break
+      case 429:
+        this.friendlyMessage = "Rate limit exceeded. Please wait a moment and try again."
+        break
+      case 404:
+        this.friendlyMessage = "The requested resource was not found."
+        break
+      case 500:
+        this.friendlyMessage = "Server error. The backend may be experiencing issues."
+        break
+      case 502:
+      case 503:
+      case 504:
+        this.friendlyMessage = "Service temporarily unavailable. Please try again later."
+        break
+      default:
+        if (status >= 400 && status < 500) {
+          this.friendlyMessage = `Request failed (${status}). Please check your input and try again.`
+        } else if (status >= 500) {
+          this.friendlyMessage = "Server error. Please try again later."
+        } else {
+          this.friendlyMessage = originalMessage
+        }
+    }
+  }
+}
+
+function createNetworkError(): ApiError {
+  const err = new ApiError(0, "Network error")
+  err.friendlyMessage = "Unable to connect to server. Please check your connection."
+  return err
 }
 
 class ApiClient {
@@ -83,13 +142,15 @@ class ApiClient {
       const response = await fetch(url, config)
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+        throw new ApiError(response.status, `HTTP error! status: ${response.status}`)
       }
 
       return await response.json()
     } catch (error) {
-      console.error(`API request failed for ${endpoint}:`, error)
-      throw error
+      if (error instanceof ApiError) {
+        throw error
+      }
+      throw createNetworkError()
     }
   }
 
@@ -100,36 +161,35 @@ class ApiClient {
     formData.append("num_days", numDays.toString())
     if (labelId) formData.append("label_id", labelId)
 
-    const response = await fetch(`${this.baseUrl}/connect_gmail`, {
-      method: "POST",
-      body: formData,
-    })
-    return response.json()
+    try {
+      const response = await fetch(`${this.baseUrl}/connect_gmail`, {
+        method: "POST",
+        body: formData,
+      })
+      if (!response.ok) throw new ApiError(response.status, `HTTP error! status: ${response.status}`)
+      return response.json()
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw createNetworkError()
+    }
   }
 
   async getGmailLabels(accountId: string): Promise<GmailLabelsResponse> {
-    const response = await fetch(`${this.baseUrl}/get_gmail_labels`, {
+    return this.request("/get_gmail_labels", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify({ account_id: accountId }),
     })
-    return response.json()
   }
 
-  async summarizeEmails(emailIds: string[], accountId?: string): Promise<SummarizeResponse> {
-    const response = await fetch(`${this.baseUrl}/summarize_emails`, {
+  async summarizeEmails(emailIds: string[], accountId?: string, forceRefresh = false): Promise<SummarizeResponse> {
+    return this.request("/summarize_emails", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify({
         email_ids: emailIds,
         ...(accountId && { account_id: accountId }),
+        force_refresh: forceRefresh,
       }),
     })
-    return response.json()
   }
 
   // Google Drive API methods
@@ -138,11 +198,17 @@ class ApiClient {
     formData.append("account_id", accountId)
     formData.append("num_days", numDays.toString())
 
-    const response = await fetch(`${this.baseUrl}/connect_google_drive`, {
-      method: "POST",
-      body: formData,
-    })
-    return response.json()
+    try {
+      const response = await fetch(`${this.baseUrl}/connect_google_drive`, {
+        method: "POST",
+        body: formData,
+      })
+      if (!response.ok) throw new ApiError(response.status, `HTTP error! status: ${response.status}`)
+      return response.json()
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw createNetworkError()
+    }
   }
 
   // Outlook API methods
@@ -162,10 +228,10 @@ class ApiClient {
     })
   }
 
-  async summarizeOutlookEmails(emailIds: string[]) {
+  async summarizeOutlookEmails(emailIds: string[], forceRefresh = false) {
     return this.request("/summarize_outlook_emails", {
       method: "POST",
-      body: JSON.stringify({ email_ids: emailIds }),
+      body: JSON.stringify({ email_ids: emailIds, force_refresh: forceRefresh }),
     })
   }
 
@@ -193,6 +259,7 @@ class ApiClient {
     fileMimeType: string,
     fileSource: string,
     accountId?: string,
+    forceRefresh = false,
   ): Promise<SummarizeFileResponse> {
     const formData = new FormData()
     formData.append("file_id", fileId)
@@ -200,38 +267,59 @@ class ApiClient {
     formData.append("file_mime_type", fileMimeType)
     formData.append("file_source", fileSource)
     if (accountId) formData.append("account_id", accountId)
+    formData.append("force_refresh", forceRefresh.toString())
 
-    const response = await fetch(`${this.baseUrl}/summarize`, {
-      method: "POST",
-      body: formData,
-    })
-    return response.json()
+    try {
+      const response = await fetch(`${this.baseUrl}/summarize`, {
+        method: "POST",
+        body: formData,
+      })
+      if (!response.ok) throw new ApiError(response.status, `HTTP error! status: ${response.status}`)
+      return response.json()
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw createNetworkError()
+    }
   }
 
   // AI Q&A
   async askGemini(query: string, originalText: string, summary: string): Promise<GeminiResponse> {
-    const response = await fetch(`${this.baseUrl}/ask_gemini`, {
+    return this.request("/ask_gemini", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify({
         query: query,
         original_text: originalText,
         summary: summary,
       }),
     })
-    return response.json()
   }
 
   // Canvas API methods
-  async getCourseDetails(courseId: string, contentType: string) {
+  async getCourseDetails(courseId: string, contentType: string, forceRefresh = false) {
     return this.request("/course_details", {
       method: "POST",
       body: JSON.stringify({
         course_id: courseId,
         content_type: contentType,
+        force_refresh: forceRefresh,
       }),
+    })
+  }
+
+  // Disconnect service
+  async disconnectService(serviceType: string, accountEmail?: string): Promise<{ status: string; message: string }> {
+    return this.request(`/disconnect/${serviceType}`, {
+      method: "POST",
+      body: JSON.stringify({
+        ...(accountEmail && { account_email: accountEmail }),
+      }),
+    })
+  }
+
+  // Get connected services
+  async getConnectedServices(): Promise<{ status: string; services: ConnectedService[] }> {
+    return this.request("/connected_services", {
+      method: "GET",
     })
   }
 }
