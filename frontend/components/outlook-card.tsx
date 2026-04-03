@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { RefreshCw, Unplug } from "lucide-react"
 import { useToast } from "@/lib/toast-context"
 import { ApiError } from "@/lib/api"
+import { AccountPicker } from "@/components/account-picker"
 import type { DataItem, OutlookState } from "@/app/page"
 
 interface OutlookCardProps {
@@ -261,12 +262,15 @@ export function OutlookCard({ storeData, state, setState, onDisconnect }: Outloo
       </div>
 
       {!account && (
-        <Button
-          onClick={connectOutlook}
-          className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700 mb-4"
-        >
-          Connect Microsoft
-        </Button>
+        <div className="mb-4">
+          <AccountPicker
+            serviceType="outlook"
+            serviceName="Outlook"
+            onConnectNew={connectOutlook}
+            onReconnect={connectOutlook}
+            isConnecting={status.includes("Connecting")}
+          />
+        </div>
       )}
 
       <p className="mb-4">Status: {status}</p>

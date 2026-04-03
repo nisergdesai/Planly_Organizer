@@ -868,12 +868,80 @@ def connected_services():
         return jsonify({"status": "success", "services": []})
 
 
+@app.route('/service_accounts/<service_type>', methods=['GET'])
+def get_service_accounts(service_type):
+    """Get all accounts (active and inactive) for a service type.
+    
+    Used to show previously connected accounts that can be reconnected.
+    """
+    print(f"Service accounts endpoint hit for: {service_type}")
+    
+    # Map frontend service names to database enum values
+    SERVICE_TYPE_MAP = {
+        'gmail': 'gmail',
+        'drive': 'google_drive',
+        'google_drive': 'google_drive',
+        'outlook': 'outlook',
+        'onedrive': 'onedrive',
+        'canvas': 'canvas',
+    }
+    db_service_type = SERVICE_TYPE_MAP.get(service_type, service_type)
+    
+    try:
+        accounts = db_helpers.get_service_accounts(DEFAULT_USER_ID, db_service_type)
+        return jsonify({"status": "success", "accounts": accounts})
+    except Exception as e:
+        print(f"Error getting service accounts: {str(e)}")
+        return jsonify({"status": "success", "accounts": []})
+
+
+@app.route('/reconnect_service/<service_type>/<account_email>', methods=['POST'])
+def reconnect_service(service_type, account_email):
+    """Reactivate a previously disconnected service connection.
+    
+    This marks the connection as active again. The frontend should then
+    trigger the appropriate OAuth flow to refresh tokens.
+    """
+    print(f"Reconnect service endpoint hit: {service_type} / {account_email}")
+    
+    # Map frontend service names to database enum values
+    SERVICE_TYPE_MAP = {
+        'gmail': 'gmail',
+        'drive': 'google_drive',
+        'google_drive': 'google_drive',
+        'outlook': 'outlook',
+        'onedrive': 'onedrive',
+        'canvas': 'canvas',
+    }
+    db_service_type = SERVICE_TYPE_MAP.get(service_type, service_type)
+    
+    try:
+        conn = db_helpers.reactivate_service_connection(
+            DEFAULT_USER_ID, db_service_type, account_email
+        )
+        if conn:
+            return jsonify({
+                "status": "success",
+                "message": f"Reactivated {account_email} for {service_type}",
+                "account_email": account_email,
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "message": f"No previous connection found for {account_email}",
+            }), 404
+    except Exception as e:
+        print(f"Error reconnecting service: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 if __name__ == '__main__':
     print("Starting Flask server on http://localhost:5001")
     print("Available routes:")
     print("  GET  /health")
     print("  GET  /")
     print("  GET  /connected_services")
+    print("  GET  /service_accounts/<service_type>")
     print("  POST /connect_gmail")
     print("  POST /connect_google_drive")
     print("  POST /get_gmail_labels")
@@ -887,4 +955,5 @@ if __name__ == '__main__':
     print("  POST /ask_gemini")
     print("  POST /summarize_outlook_emails")
     print("  POST /disconnect/<service_type>")
+    print("  POST /reconnect_service/<service_type>/<account_email>")
     app.run(debug=True, port=5001)

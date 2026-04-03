@@ -508,3 +508,71 @@ def get_connected_services():
         return result
     finally:
         session.close()
+
+
+def get_service_accounts(user_id: int, service_type: str) -> list[dict]:
+    """Get all accounts (active and inactive) for a user and service type.
+    
+    Returns a list of accounts with their connection status, useful for
+    showing previously connected accounts that can be reconnected.
+    """
+    session: Session = get_session()
+    try:
+        connections = (
+            session.query(ServiceConnection)
+            .filter(
+                and_(
+                    ServiceConnection.user_id == user_id,
+                    ServiceConnection.service_type == service_type,
+                )
+            )
+            .order_by(ServiceConnection.updated_at.desc())
+            .all()
+        )
+        result = []
+        for conn in connections:
+            result.append({
+                'account_email': conn.account_email,
+                'is_active': conn.is_active,
+                'connected_at': conn.created_at.isoformat() if conn.created_at else None,
+                'last_updated': conn.updated_at.isoformat() if conn.updated_at else None,
+            })
+        return result
+    finally:
+        session.close()
+
+
+def reactivate_service_connection(
+    user_id: int,
+    service_type: str,
+    account_email: str,
+) -> ServiceConnection | None:
+    """Reactivate a previously disconnected service connection.
+    
+    Returns the reactivated connection, or None if not found.
+    """
+    session: Session = get_session()
+    try:
+        conn = (
+            session.query(ServiceConnection)
+            .filter(
+                and_(
+                    ServiceConnection.user_id == user_id,
+                    ServiceConnection.service_type == service_type,
+                    ServiceConnection.account_email == account_email,
+                )
+            )
+            .first()
+        )
+        if conn:
+            conn.is_active = True
+            conn.updated_at = datetime.now(timezone.utc)
+            session.commit()
+            session.expunge(conn)
+            return conn
+        return None
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

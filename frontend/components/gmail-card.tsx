@@ -13,6 +13,7 @@ import {
   type GmailLabelsResponse,
   type SummarizeResponse,
 } from "@/lib/api"
+import { AccountPicker } from "@/components/account-picker"
 import type { DataItem, GmailState } from "@/app/page"
 
 interface GmailCardProps {
@@ -43,11 +44,12 @@ export function GmailCard({ storeData, state, setState, onDisconnect }: GmailCar
     setState((prev) => ({ ...prev, ...updates }))
   }
 
-  const connectGmail = async (isAdditional = false) => {
-    updateState({ status: "Connecting Gmail... ⏳" })
+  const connectGmail = async (isAdditional = false, reconnectEmail?: string) => {
+    updateState({ status: reconnectEmail ? `Reconnecting ${reconnectEmail}... ⏳` : "Connecting Gmail... ⏳" })
 
     try {
-      const accountId = `gmail_${Date.now()}`
+      // Use the reconnect email as a hint for account selection, or generate new ID
+      const accountId = reconnectEmail || `gmail_${Date.now()}`
 
       const response = await fetch("/api/connect_gmail", {
         method: "POST",
@@ -267,21 +269,13 @@ export function GmailCard({ storeData, state, setState, onDisconnect }: GmailCar
       </div>
 
       <div className="mb-4">
-        {accounts.length === 0 ? (
-          <Button
-            onClick={() => connectGmail(false)}
-            className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700"
-          >
-            Connect Gmail
-          </Button>
-        ) : (
-          <Button
-            onClick={() => connectGmail(true)}
-            className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700"
-          >
-            Connect Another Gmail Account
-          </Button>
-        )}
+        <AccountPicker
+          serviceType="gmail"
+          serviceName="Gmail"
+          onConnectNew={() => connectGmail(accounts.length > 0)}
+          onReconnect={(accountEmail) => connectGmail(true, accountEmail)}
+          isConnecting={status.includes("Connecting")}
+        />
       </div>
 
       <p className="mb-4">Status: {status}</p>

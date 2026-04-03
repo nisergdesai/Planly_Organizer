@@ -12,6 +12,7 @@ import {
   type SummarizeFileResponse,
   type GeminiResponse,
 } from "@/lib/api"
+import { AccountPicker } from "@/components/account-picker"
 import type { DataItem, DriveState } from "@/app/page"
 
 interface DriveCardProps {
@@ -39,9 +40,9 @@ export function DriveCard({ storeData, state, setState, onDisconnect }: DriveCar
     setState({ ...state, ...updates })
   }
 
-  const connectDrive = async (isAdditional = false) => {
-    const accountId = `drive_${connectedCount}`
-    updateState({ status: "Connecting Google Drive... ⏳" })
+  const connectDrive = async (isAdditional = false, reconnectEmail?: string) => {
+    const accountId = reconnectEmail || `drive_${connectedCount}`
+    updateState({ status: reconnectEmail ? `Reconnecting ${reconnectEmail}... ⏳` : "Connecting Google Drive... ⏳" })
 
     try {
       const response = await fetch("/api/connect_google_drive", {
@@ -269,21 +270,13 @@ export function DriveCard({ storeData, state, setState, onDisconnect }: DriveCar
       </div>
 
       <div className="mb-4">
-        {accounts.length === 0 ? (
-          <Button
-            onClick={() => connectDrive(false)}
-            className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700"
-          >
-            Connect Google Drive
-          </Button>
-        ) : (
-          <Button
-            onClick={() => connectDrive(true)}
-            className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700"
-          >
-            Connect Another Drive Account
-          </Button>
-        )}
+        <AccountPicker
+          serviceType="drive"
+          serviceName="Google Drive"
+          onConnectNew={() => connectDrive(accounts.length > 0)}
+          onReconnect={(accountEmail) => connectDrive(true, accountEmail)}
+          isConnecting={status.includes("Connecting")}
+        />
       </div>
 
       <p className="mb-4">Status: {status}</p>

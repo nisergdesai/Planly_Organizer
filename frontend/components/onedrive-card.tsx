@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Loader2, RefreshCw, Unplug } from "lucide-react"
 import { useToast } from "@/lib/toast-context"
 import { apiClient, ApiError } from "@/lib/api"
+import { AccountPicker } from "@/components/account-picker"
 import type { DataItem, OnedriveState } from "@/app/page"
 
 interface OnedriveCardProps {
@@ -290,12 +291,15 @@ export function OnedriveCard({ storeData, state, setState, onDisconnect }: Onedr
       </div>
 
       {!account && (
-        <Button
-          onClick={connectOnedrive}
-          className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700 mb-4"
-        >
-          Connect Microsoft
-        </Button>
+        <div className="mb-4">
+          <AccountPicker
+            serviceType="onedrive"
+            serviceName="OneDrive"
+            onConnectNew={connectOnedrive}
+            onReconnect={connectOnedrive}
+            isConnecting={status.includes("Connecting")}
+          />
+        </div>
       )}
 
       <p className="mb-4">Status: {status}</p>

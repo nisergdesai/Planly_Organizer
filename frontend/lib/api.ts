@@ -72,6 +72,24 @@ export interface ConnectedService {
   connected_at: string | null
 }
 
+export interface ServiceAccount {
+  account_email: string | null
+  is_active: boolean
+  connected_at: string | null
+  last_updated: string | null
+}
+
+export interface ServiceAccountsResponse {
+  status: string
+  accounts: ServiceAccount[]
+}
+
+export interface ReconnectServiceResponse {
+  status: string
+  message: string
+  account_email?: string
+}
+
 // ApiError class with friendly messages
 export class ApiError extends Error {
   status: number
@@ -320,6 +338,20 @@ class ApiClient {
   async getConnectedServices(): Promise<{ status: string; services: ConnectedService[] }> {
     return this.request("/connected_services", {
       method: "GET",
+    })
+  }
+
+  // Get all accounts (active and inactive) for a service type
+  async getServiceAccounts(serviceType: string): Promise<ServiceAccountsResponse> {
+    return this.request(`/service_accounts/${serviceType}`, {
+      method: "GET",
+    })
+  }
+
+  // Reconnect a previously disconnected service account
+  async reconnectService(serviceType: string, accountEmail: string): Promise<ReconnectServiceResponse> {
+    return this.request(`/reconnect_service/${serviceType}/${encodeURIComponent(accountEmail)}`, {
+      method: "POST",
     })
   }
 }

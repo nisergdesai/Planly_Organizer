@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { RefreshCw, Unplug } from "lucide-react"
 import { useToast } from "@/lib/toast-context"
 import { ApiError } from "@/lib/api"
+import { AccountPicker } from "@/components/account-picker"
 import type { DataItem, CanvasState } from "@/app/page"
 
 interface CanvasCardProps {
@@ -144,13 +145,17 @@ export function CanvasCard({ storeData, state, setState, onDisconnect }: CanvasC
         )}
       </div>
 
-      <Button
-        onClick={connectCanvas}
-        className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700 mb-4"
-        disabled={status.includes("⏳")}
-      >
-        {status.includes("⏳") ? "Connecting..." : "Connect Canvas"}
-      </Button>
+      {!isConnected && (
+        <div className="mb-4">
+          <AccountPicker
+            serviceType="canvas"
+            serviceName="Canvas"
+            onConnectNew={connectCanvas}
+            onReconnect={connectCanvas}
+            isConnecting={status.includes("⏳")}
+          />
+        </div>
+      )}
       <p className="mb-4">Status: {status}</p>
 
       {courses.length > 0 && (
