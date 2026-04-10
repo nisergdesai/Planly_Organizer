@@ -17,7 +17,7 @@ class Config:
     # --- Database ---
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
-        "postgresql://planly:planly@localhost:5432/planly_organizer",
+        "sqlite:///planly_organizer.db",
     )
 
     # --- Google APIs ---

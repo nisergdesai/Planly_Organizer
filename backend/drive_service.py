@@ -6,7 +6,7 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 from google.auth.transport.requests import Request
 import datetime
 
-def Create_Service_Drive(client_secret_file, api_name, api_version, *scopes, account_id="default"):
+def Create_Service_Drive(client_secret_file, api_name, api_version, *scopes, account_id="default", reconnect_only=False):
     print(client_secret_file, api_name, api_version, scopes, sep='-')
     CLIENT_SECRET_FILE = client_secret_file
     API_SERVICE_NAME = api_name
@@ -27,6 +27,8 @@ def Create_Service_Drive(client_secret_file, api_name, api_version, *scopes, acc
         if cred and cred.expired and cred.refresh_token:
             cred.refresh(Request())
         else:
+            if reconnect_only:
+                return None, None
             flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
             
             # You can use run_local_server or run_console based on the environment

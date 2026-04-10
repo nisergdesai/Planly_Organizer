@@ -124,18 +124,46 @@ export default function Dashboard() {
     })
   }
 
-  const handleDisconnect = async (serviceType: string) => {
+  const handleDisconnect = async (serviceType: string, accountEmail?: string) => {
     try {
-      await apiClient.disconnectService(serviceType)
-      toast.success(`${serviceType} disconnected successfully.`)
+      await apiClient.disconnectService(serviceType, accountEmail)
+      toast.success(
+        accountEmail
+          ? `${serviceType} account disconnected: ${accountEmail}`
+          : `${serviceType} disconnected successfully.`,
+      )
 
       // Reset the service state
       switch (serviceType) {
         case "gmail":
-          setGmailState({ status: "Not Connected", accounts: [], connectedCount: 0 })
+          if (accountEmail) {
+            setGmailState((prev) => {
+              const nextAccounts = prev.accounts.filter((acc) => acc.email !== accountEmail)
+              return {
+                ...prev,
+                accounts: nextAccounts,
+                connectedCount: nextAccounts.length,
+                status: nextAccounts.length > 0 ? "Connected ✅" : "Not Connected",
+              }
+            })
+          } else {
+            setGmailState({ status: "Not Connected", accounts: [], connectedCount: 0 })
+          }
           break
         case "drive":
-          setDriveState({ status: "Not Connected", accounts: [], connectedCount: 0 })
+          if (accountEmail) {
+            setDriveState((prev) => {
+              const nextAccounts = prev.accounts.filter((acc) => acc.email !== accountEmail)
+              return {
+                ...prev,
+                accounts: nextAccounts,
+                connectedCount: nextAccounts.length,
+                status: nextAccounts.length > 0 ? "Connected ✅" : "Not Connected",
+              }
+            })
+          } else {
+            setDriveState({ status: "Not Connected", accounts: [], connectedCount: 0 })
+          }
           break
         case "outlook":
           setOutlookState({ status: "Not Connected", account: null, selectedEmails: [] })
@@ -148,8 +176,14 @@ export default function Dashboard() {
           break
       }
 
-      // Remove data for this service
-      setAllData((prev) => prev.filter((item) => item.service !== serviceType))
+      // Remove data for this service (and account if provided)
+      setAllData((prev) =>
+        prev.filter((item) => {
+          if (item.service !== serviceType) return true
+          if (!accountEmail) return false
+          return item.account !== accountEmail
+        }),
+      )
     } catch (error) {
       if (error instanceof ApiError) {
         toast.error(error.friendlyMessage)
@@ -168,19 +202,19 @@ export default function Dashboard() {
           <SearchContainer allData={allData} />
 
           {activeService === "gmail" && (
-            <GmailCard storeData={storeData} state={gmailState} setState={setGmailState} onDisconnect={() => handleDisconnect("gmail")} />
+            <GmailCard storeData={storeData} state={gmailState} setState={setGmailState} onDisconnect={(accountEmail?: string) => handleDisconnect("gmail", accountEmail)} />
           )}
           {activeService === "drive" && (
-            <DriveCard storeData={storeData} state={driveState} setState={setDriveState} onDisconnect={() => handleDisconnect("drive")} />
+            <DriveCard storeData={storeData} state={driveState} setState={setDriveState} onDisconnect={(accountEmail?: string) => handleDisconnect("drive", accountEmail)} />
           )}
           {activeService === "outlook" && (
-            <OutlookCard storeData={storeData} state={outlookState} setState={setOutlookState} onDisconnect={() => handleDisconnect("outlook")} />
+            <OutlookCard storeData={storeData} state={outlookState} setState={setOutlookState} onDisconnect={(accountEmail?: string) => handleDisconnect("outlook", accountEmail)} />
           )}
           {activeService === "onedrive" && (
-            <OnedriveCard storeData={storeData} state={onedriveState} setState={setOnedriveState} onDisconnect={() => handleDisconnect("onedrive")} />
+            <OnedriveCard storeData={storeData} state={onedriveState} setState={setOnedriveState} onDisconnect={(accountEmail?: string) => handleDisconnect("onedrive", accountEmail)} />
           )}
           {activeService === "canvas" && (
-            <CanvasCard storeData={storeData} state={canvasState} setState={setCanvasState} onDisconnect={() => handleDisconnect("canvas")} />
+            <CanvasCard storeData={storeData} state={canvasState} setState={setCanvasState} onDisconnect={(accountEmail?: string) => handleDisconnect("canvas", accountEmail)} />
           )}
         </div>
       )}

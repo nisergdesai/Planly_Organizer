@@ -72,6 +72,15 @@ export interface ConnectedService {
   connected_at: string | null
 }
 
+export interface MicrosoftCodeResponse {
+  status: string
+  user_code?: string
+  verification_url?: string
+  account_id?: string
+  email_address?: string
+  message?: string
+}
+
 // ApiError class with friendly messages
 export class ApiError extends Error {
   status: number
@@ -155,11 +164,12 @@ class ApiClient {
   }
 
   // Gmail API methods
-  async connectGmail(accountId: string, numDays = -1, labelId?: string): Promise<GmailConnectResponse> {
+  async connectGmail(accountId: string, numDays = -1, labelId?: string, accountEmail?: string): Promise<GmailConnectResponse> {
     const formData = new FormData()
     formData.append("account_id", accountId)
     formData.append("num_days", numDays.toString())
     if (labelId) formData.append("label_id", labelId)
+    if (accountEmail) formData.append("account_email", accountEmail)
 
     try {
       const response = await fetch(`${this.baseUrl}/connect_gmail`, {
@@ -193,10 +203,11 @@ class ApiClient {
   }
 
   // Google Drive API methods
-  async connectGoogleDrive(accountId: string, numDays = -1): Promise<DriveConnectResponse> {
+  async connectGoogleDrive(accountId: string, numDays = -1, accountEmail?: string): Promise<DriveConnectResponse> {
     const formData = new FormData()
     formData.append("account_id", accountId)
     formData.append("num_days", numDays.toString())
+    if (accountEmail) formData.append("account_email", accountEmail)
 
     try {
       const response = await fetch(`${this.baseUrl}/connect_google_drive`, {
@@ -212,42 +223,77 @@ class ApiClient {
   }
 
   // Outlook API methods
-  async fetchCodeOutlook() {
+  async fetchCodeOutlook(options?: {
+    forceNewAuth?: boolean
+    reconnectOnly?: boolean
+    accountId?: string
+    accountEmail?: string
+  }): Promise<MicrosoftCodeResponse> {
+    const payload = {
+      force_new_auth: options?.forceNewAuth || false,
+      reconnect_only: options?.reconnectOnly || false,
+      account_id: options?.accountId,
+      account_email: options?.accountEmail,
+    }
     return this.request("/fetch_code_outlook", {
       method: "POST",
+      body: JSON.stringify(payload),
     })
   }
 
-  async fetchOutlook(cutoffDays = -1, type = "outlook") {
+  async fetchOutlook(cutoffDays = -1, type = "outlook", accountId?: string, accountEmail?: string, reconnectOnly = false) {
     return this.request("/fetch_outlook", {
       method: "POST",
       body: JSON.stringify({
         cutoff_days_outlook: cutoffDays,
         type: type,
+        account_id: accountId,
+        account_email: accountEmail,
+        reconnect_only: reconnectOnly,
       }),
     })
   }
 
-  async summarizeOutlookEmails(emailIds: string[], forceRefresh = false) {
+  async summarizeOutlookEmails(emailIds: string[], forceRefresh = false, accountId?: string, accountEmail?: string) {
     return this.request("/summarize_outlook_emails", {
       method: "POST",
-      body: JSON.stringify({ email_ids: emailIds, force_refresh: forceRefresh }),
+      body: JSON.stringify({
+        email_ids: emailIds,
+        force_refresh: forceRefresh,
+        account_id: accountId,
+        account_email: accountEmail,
+      }),
     })
   }
 
   // OneDrive API methods
-  async fetchCodeOnedrive() {
+  async fetchCodeOnedrive(options?: {
+    forceNewAuth?: boolean
+    reconnectOnly?: boolean
+    accountId?: string
+    accountEmail?: string
+  }): Promise<MicrosoftCodeResponse> {
+    const payload = {
+      force_new_auth: options?.forceNewAuth || false,
+      reconnect_only: options?.reconnectOnly || false,
+      account_id: options?.accountId,
+      account_email: options?.accountEmail,
+    }
     return this.request("/fetch_code_onedrive", {
       method: "POST",
+      body: JSON.stringify(payload),
     })
   }
 
-  async fetchOnedrive(cutoffDays = -1, type = "onedrive") {
+  async fetchOnedrive(cutoffDays = -1, type = "onedrive", accountId?: string, accountEmail?: string, reconnectOnly = false) {
     return this.request("/fetch_onedrive", {
       method: "POST",
       body: JSON.stringify({
         cutoff_days_onedrive: cutoffDays,
         type: type,
+        account_id: accountId,
+        account_email: accountEmail,
+        reconnect_only: reconnectOnly,
       }),
     })
   }

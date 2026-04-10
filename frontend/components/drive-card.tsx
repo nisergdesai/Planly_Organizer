@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Loader2, RefreshCw, Unplug } from "lucide-react"
 import { useToast } from "@/lib/toast-context"
@@ -11,14 +11,15 @@ import {
   type DriveConnectResponse,
   type SummarizeFileResponse,
   type GeminiResponse,
+  type ConnectedService,
 } from "@/lib/api"
 import type { DataItem, DriveState } from "@/app/page"
 
 interface DriveCardProps {
   storeData: (service: string, data: DataItem[]) => void
   state: DriveState
-  setState: (state: DriveState) => void
-  onDisconnect: () => void
+  setState: React.Dispatch<React.SetStateAction<DriveState>>
+  onDisconnect: (accountEmail?: string) => void
 }
 
 interface DriveAccount {
@@ -26,6 +27,7 @@ interface DriveAccount {
   email: string
   files: DriveFile[]
   isConnected: boolean
+  selectedDate?: string
   summaries: Record<string, { summary: string; originalText: string; cached?: boolean; cachedAt?: string }>
   answers: Record<string, string>
 }
@@ -34,13 +36,29 @@ export function DriveCard({ storeData, state, setState, onDisconnect }: DriveCar
   const { status, accounts, connectedCount } = state
   const toast = useToast()
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false)
+  const [rememberedAccounts, setRememberedAccounts] = useState<ConnectedService[]>([])
 
   const updateState = (updates: Partial<DriveState>) => {
     setState({ ...state, ...updates })
   }
 
-  const connectDrive = async (isAdditional = false) => {
-    const accountId = `drive_${connectedCount}`
+  useEffect(() => {
+    const loadRememberedAccounts = async () => {
+      try {
+        const response = await apiClient.getConnectedServices()
+        const remembered = (response.services || []).filter((s) => s.service_type === "google_drive")
+        setRememberedAccounts(remembered)
+      } catch {
+        setRememberedAccounts([])
+      }
+    }
+    loadRememberedAccounts()
+  }, [])
+
+  const connectDrive = async (isAdditional = false, rememberedEmail?: string) => {
+    const accountId = rememberedEmail
+      ? `drive_${rememberedEmail.replace(/[^a-zA-Z0-9]+/g, "_").toLowerCase()}`
+      : `drive_${Date.now()}`
     updateState({ status: "Connecting Google Drive... ⏳" })
 
     try {
@@ -49,18 +67,21 @@ export function DriveCard({ storeData, state, setState, onDisconnect }: DriveCar
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
           account_id: accountId,
+          ...(rememberedEmail ? { account_email: rememberedEmail } : {}),
+          reconnect_only: rememberedEmail ? "true" : "false",
           num_days: "0",
         }),
       })
 
       const data = await response.json()
 
-      if (data.status === "success") {
-        updateState({
-          status: "Connected ✅ - Please select a date range",
-          connectedCount: connectedCount + 1,
-        })
+      if (data.status === "reauth_required") {
+        updateState({ status: "Reconnect requires authentication ❗" })
+        toast.warning(data.message || "Saved credentials not found. Please authenticate again.")
+        return
+      }
 
+      if (data.status === "success") {
         const newAccount: DriveAccount = {
           id: data.account_id || accountId,
           email: data.email_address || "Connected Account",
@@ -69,8 +90,21 @@ export function DriveCard({ storeData, state, setState, onDisconnect }: DriveCar
           summaries: {},
           answers: {},
         }
-
-        updateState({ accounts: [...accounts, newAccount] })
+        setState((prev) => {
+          const existingIndex = prev.accounts.findIndex((acc) => acc.email === newAccount.email)
+          const nextAccounts = [...prev.accounts]
+          if (existingIndex >= 0) {
+            nextAccounts[existingIndex] = { ...nextAccounts[existingIndex], ...newAccount }
+          } else {
+            nextAccounts.push(newAccount)
+          }
+          return {
+            ...prev,
+            status: "Connected ✅ - Please select a date range",
+            connectedCount: nextAccounts.length,
+            accounts: nextAccounts,
+          }
+        })
         toast.success("Google Drive connected successfully!")
       } else {
         updateState({ status: "Connection Failed ❌" })
@@ -231,6 +265,9 @@ export function DriveCard({ storeData, state, setState, onDisconnect }: DriveCar
   }
 
   const isConnected = accounts.length > 0
+  const availableRemembered = rememberedAccounts.filter(
+    (r) => r.account_email && !accounts.some((acc) => acc.email === r.account_email)
+  )
 
   return (
     <div className="bg-amber-900/15 p-8 rounded-xl shadow-lg border border-white/20 mb-8">
@@ -269,19 +306,43 @@ export function DriveCard({ storeData, state, setState, onDisconnect }: DriveCar
       </div>
 
       <div className="mb-4">
+        {availableRemembered.length > 0 && (
+          <div className="mb-3 p-3 rounded-lg bg-white/5 border border-white/10">
+            <p className="text-sm mb-2">Previously connected Drive accounts:</p>
+            <div className="flex gap-2 flex-wrap">
+              {availableRemembered.map((saved) => (
+                <div key={`${saved.service_type}-${saved.account_email}`} className="flex items-center gap-1">
+                  <Button
+                    onClick={() => connectDrive(true, saved.account_email || undefined)}
+                    className="bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-400/40"
+                  >
+                    Reconnect {saved.account_email}
+                  </Button>
+                  <Button
+                    onClick={() => onDisconnect(saved.account_email || undefined)}
+                    className="bg-red-600/20 hover:bg-red-600/40 border border-red-500/30 px-2"
+                    title="Forget this remembered account"
+                  >
+                    Forget
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {accounts.length === 0 ? (
           <Button
             onClick={() => connectDrive(false)}
             className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700"
           >
-            Connect Google Drive
+            Authenticate New Drive Account
           </Button>
         ) : (
           <Button
             onClick={() => connectDrive(true)}
             className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700"
           >
-            Connect Another Drive Account
+            Authenticate Another Drive Account
           </Button>
         )}
       </div>
@@ -295,6 +356,7 @@ export function DriveCard({ storeData, state, setState, onDisconnect }: DriveCar
           onSummarize={summarizeFile}
           onAskQuestion={askQuestion}
           onFetchFiles={fetchFilesFromDate}
+          onDisconnectAccount={(accountEmail) => onDisconnect(accountEmail)}
           getDefaultDate={getDefaultDate}
           onDateChange={(date) => {
             const updated = state.accounts.map((a) => a.id === account.id ? { ...a, selectedDate: date } : a)
@@ -317,6 +379,7 @@ interface DriveAccountSectionProps {
     accountId: string
   ) => Promise<string>
   onFetchFiles: (accountId: string, startDate: string) => Promise<void>
+  onDisconnectAccount: (accountEmail: string) => void
   getDefaultDate: () => string
   onDateChange?: (date: string) => void
 }
@@ -326,11 +389,13 @@ function DriveAccountSection({
   onSummarize,
   onAskQuestion,
   onFetchFiles,
+  onDisconnectAccount,
   getDefaultDate,
   onDateChange,
 }: DriveAccountSectionProps) {
   const [selectedDate, setSelectedDate] = useState(account.selectedDate || "")
   const [isLoading, setIsLoading] = useState(false)
+  const [isMinimized, setIsMinimized] = useState(false)
   const [loadingFileId, setLoadingFileId] = useState<string | null>(null)
   const [questions, setQuestions] = useState<Record<string, string>>({})
   const [asking, setAsking] = useState<Record<string, boolean>>({})
@@ -360,8 +425,26 @@ function DriveAccountSection({
 
   return (
     <div className="mb-6 p-4 border border-gray-600 rounded-lg">
-      <h3 className="text-lg font-semibold mb-3">Drive Account: {account.email}</h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-lg font-semibold">Drive Account: {account.email}</h3>
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={() => setIsMinimized((v) => !v)}
+            className="bg-white/10 hover:bg-white/20 border border-white/20 text-xs px-2 py-1"
+          >
+            {isMinimized ? "Expand" : "Minimize"}
+          </Button>
+          <Button
+            onClick={() => onDisconnectAccount(account.email)}
+            className="bg-red-600/20 hover:bg-red-600/40 border border-red-500/30 text-xs px-2 py-1"
+          >
+            Disconnect Account
+          </Button>
+        </div>
+      </div>
 
+      {!isMinimized && (
+      <>
       <div className="mb-6 p-4 bg-blue-900/20 rounded-lg border border-blue-500/30">
         <h4 className="text-lg font-semibold mb-3 text-blue-300">Select Date Range</h4>
         <p className="text-sm text-gray-300 mb-3">
@@ -473,6 +556,8 @@ function DriveAccountSection({
           ))
         )}
       </ul>
+      </>
+      )}
     </div>
   )
 }

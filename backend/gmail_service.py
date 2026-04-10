@@ -7,7 +7,7 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 from google.auth.transport.requests import Request
 
 
-def Create_Service(client_secret_file, api_name, api_version, *scopes, account_id="default"):
+def Create_Service(client_secret_file, api_name, api_version, *scopes, account_id="default", reconnect_only=False):
     print(client_secret_file, api_name, api_version, scopes, sep='-')
     CLIENT_SECRET_FILE = client_secret_file
     API_SERVICE_NAME = api_name
@@ -28,6 +28,8 @@ def Create_Service(client_secret_file, api_name, api_version, *scopes, account_i
         if cred and cred.expired and cred.refresh_token:
             cred.refresh(Request())
         else:
+            if reconnect_only:
+                return None
             flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
             cred = flow.run_local_server(port=0)
 

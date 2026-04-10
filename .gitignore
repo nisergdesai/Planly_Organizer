@@ -20,6 +20,7 @@ venv/
 *.safetensors
 *.npy
 *.h5
+backend/*.db
 
 # Microsoft Graph API token (now per-account)
 ms_graph_api_token*.json

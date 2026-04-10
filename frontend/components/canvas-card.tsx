@@ -1,10 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { RefreshCw, Unplug } from "lucide-react"
 import { useToast } from "@/lib/toast-context"
-import { ApiError } from "@/lib/api"
+import { apiClient, ApiError, type ConnectedService } from "@/lib/api"
 import type { DataItem, CanvasState } from "@/app/page"
 
 interface CanvasCardProps {
@@ -23,6 +23,7 @@ export function CanvasCard({ storeData, state, setState, onDisconnect }: CanvasC
   const { status, courses, selectedCourse, courseContent } = state
   const toast = useToast()
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false)
+  const [rememberedAccounts, setRememberedAccounts] = useState<ConnectedService[]>([])
   const [contentCached, setContentCached] = useState(false)
   const [contentCachedAt, setContentCachedAt] = useState<string | null>(null)
   const [lastContentType, setLastContentType] = useState<string | null>(null)
@@ -30,6 +31,19 @@ export function CanvasCard({ storeData, state, setState, onDisconnect }: CanvasC
   const updateState = (updates: Partial<CanvasState>) => {
     setState({ ...state, ...updates })
   }
+
+  useEffect(() => {
+    const loadRememberedAccounts = async () => {
+      try {
+        const response = await apiClient.getConnectedServices()
+        const remembered = (response.services || []).filter((s) => s.service_type === "canvas")
+        setRememberedAccounts(remembered)
+      } catch {
+        setRememberedAccounts([])
+      }
+    }
+    loadRememberedAccounts()
+  }, [])
 
   const connectCanvas = async () => {
     updateState({ status: "Connecting Canvas... ⏳" })
@@ -144,13 +158,24 @@ export function CanvasCard({ storeData, state, setState, onDisconnect }: CanvasC
         )}
       </div>
 
-      <Button
-        onClick={connectCanvas}
-        className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700 mb-4"
-        disabled={status.includes("⏳")}
-      >
-        {status.includes("⏳") ? "Connecting..." : "Connect Canvas"}
-      </Button>
+      <div className="mb-4 flex gap-2 flex-wrap">
+        {courses.length === 0 && rememberedAccounts.length > 0 && (
+          <Button
+            onClick={connectCanvas}
+            className="bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-400/40"
+            disabled={status.includes("⏳")}
+          >
+            Reconnect Remembered Canvas
+          </Button>
+        )}
+        <Button
+          onClick={connectCanvas}
+          className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700"
+          disabled={status.includes("⏳")}
+        >
+          {status.includes("⏳") ? "Connecting..." : "Connect Canvas"}
+        </Button>
+      </div>
       <p className="mb-4">Status: {status}</p>
 
       {courses.length > 0 && (

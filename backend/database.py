@@ -13,14 +13,29 @@ class Base(DeclarativeBase):
     pass
 
 
-# Create engine (pool pre-ping ensures stale connections are recycled)
-engine = create_engine(
-    Config.DATABASE_URL,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    echo=False,
-)
+def _create_db_engine():
+    """Create a SQLAlchemy engine with sensible defaults per DB dialect."""
+    database_url = Config.DATABASE_URL
+
+    # SQLite needs different connection options than server DBs.
+    if database_url.startswith("sqlite"):
+        return create_engine(
+            database_url,
+            connect_args={"check_same_thread": False},
+            echo=False,
+        )
+
+    # Server-backed databases (Postgres/MySQL, etc.)
+    return create_engine(
+        database_url,
+        pool_pre_ping=True,
+        pool_size=10,
+        max_overflow=20,
+        echo=False,
+    )
+
+
+engine = _create_db_engine()
 
 # Session factory
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)

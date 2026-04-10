@@ -4,6 +4,7 @@ Each function manages its own session lifecycle (create, commit/rollback, close)
 """
 
 from datetime import datetime, timezone, timedelta
+import re
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,23 @@ from models import (
     Classification,
     encrypt_token,
 )
+
+
+def derive_account_id(service_type: str, account_email: str | None) -> str | None:
+    """Derive a stable local account_id from service + email for token file reuse."""
+    if not account_email:
+        return None
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "_", account_email.strip().lower()).strip("_")
+    if not normalized:
+        return None
+    prefix = {
+        "gmail": "gmail",
+        "google_drive": "drive",
+        "outlook": "outlook",
+        "onedrive": "onedrive",
+        "canvas": "canvas",
+    }.get(service_type, service_type)
+    return f"{prefix}_{normalized}"
 
 
 # ---------------------------------------------------------------------------
@@ -500,9 +518,11 @@ def get_connected_services():
         )
         result = []
         for conn in connections:
+            account_id = derive_account_id(conn.service_type, conn.account_email)
             result.append({
                 'service_type': conn.service_type,
                 'account_email': conn.account_email,
+                'account_id': account_id,
                 'connected_at': conn.created_at.isoformat() if conn.created_at else None,
             })
         return result

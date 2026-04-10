@@ -1,17 +1,17 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { RefreshCw, Unplug } from "lucide-react"
 import { useToast } from "@/lib/toast-context"
-import { ApiError } from "@/lib/api"
+import { apiClient, ApiError, type ConnectedService } from "@/lib/api"
 import type { DataItem, OutlookState } from "@/app/page"
 
 interface OutlookCardProps {
   storeData: (service: string, data: DataItem[]) => void
   state: OutlookState
   setState: (state: OutlookState) => void
-  onDisconnect: () => void
+  onDisconnect: (accountEmail?: string) => void
 }
 
 interface OutlookEmail {
@@ -25,6 +25,7 @@ interface OutlookEmail {
 
 interface OutlookAccount {
   id: string
+  email?: string | null
   emails: OutlookEmail[]
   isConnected: boolean
   showDatePicker: boolean
@@ -39,26 +40,56 @@ export function OutlookCard({ storeData, state, setState, onDisconnect }: Outloo
   const { status, account } = state
   const toast = useToast()
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false)
+  const [isMinimized, setIsMinimized] = useState(false)
+  const [rememberedAccounts, setRememberedAccounts] = useState<ConnectedService[]>([])
+  const uniqueRememberedAccounts = rememberedAccounts.filter((saved, index, arr) => {
+    const key = (saved.account_email || saved.account_id || "").toLowerCase()
+    return key && arr.findIndex((s) => ((s.account_email || s.account_id || "").toLowerCase() === key)) === index
+  })
 
   const updateState = (updates: Partial<OutlookState>) => {
     setState({ ...state, ...updates })
   }
 
-  const connectOutlook = async () => {
+  useEffect(() => {
+    const loadRememberedAccounts = async () => {
+      try {
+        const response = await apiClient.getConnectedServices()
+        const remembered = (response.services || []).filter((s) => s.service_type === "outlook")
+        setRememberedAccounts(remembered)
+      } catch {
+        setRememberedAccounts([])
+      }
+    }
+    loadRememberedAccounts()
+  }, [])
+
+  const connectOutlook = async (forceNewAuth = false, rememberedEmail?: string, rememberedAccountId?: string) => {
     updateState({ status: "Connecting Outlook... ⏳" })
 
     try {
-      const response = await fetch("/api/fetch_code_outlook", {
-        method: "POST",
+      const accountId = rememberedAccountId || (rememberedEmail
+        ? `outlook_${rememberedEmail.replace(/[^a-zA-Z0-9]+/g, "_").toLowerCase()}`
+        : `outlook_${Date.now()}`)
+      const data = await apiClient.fetchCodeOutlook({
+        forceNewAuth,
+        reconnectOnly: !!rememberedEmail,
+        accountId,
+        accountEmail: rememberedEmail,
       })
 
-      const data = await response.json()
+      if (data.status === "reauth_required") {
+        updateState({ status: "Reconnect requires authentication ❗" })
+        toast.warning(data.message || "Saved credentials not found. Please authenticate again.")
+        return
+      }
 
       if (data.status === "pending" && data.user_code) {
         updateState({
           status: "User authentication required!",
           account: {
-            id: "outlook_account",
+            id: data.account_id || accountId,
+            email: data.email_address || rememberedEmail || null,
             emails: [],
             isConnected: false,
             showDatePicker: true,
@@ -71,7 +102,8 @@ export function OutlookCard({ storeData, state, setState, onDisconnect }: Outloo
         updateState({
           status: "Connected ✅ - Please select a date range",
           account: {
-            id: "outlook_account",
+            id: data.account_id || accountId,
+            email: data.email_address || rememberedEmail || null,
             emails: [],
             isConnected: true,
             showDatePicker: true,
@@ -90,6 +122,10 @@ export function OutlookCard({ storeData, state, setState, onDisconnect }: Outloo
         toast.error("Unable to connect to server. Please check your connection.")
       }
     }
+  }
+
+  const reconnectRememberedOutlook = async (rememberedEmail?: string | null, rememberedAccountId?: string | null) => {
+    await connectOutlook(false, rememberedEmail || undefined, rememberedAccountId || undefined)
   }
 
   const authenticate = () => {
@@ -111,16 +147,12 @@ export function OutlookCard({ storeData, state, setState, onDisconnect }: Outloo
       const timeDiff = today.getTime() - selectedDate.getTime()
       const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24))
 
-      const response = await fetch("/api/fetch_outlook", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cutoff_days_outlook: daysDiff,
-          type: "outlook",
-        }),
-      })
-
-      const data = await response.json()
+      const data: any = await apiClient.fetchOutlook(
+        daysDiff,
+        "outlook",
+        account?.id,
+        account?.email || undefined,
+      )
 
       if (data.status === "pending") {
         updateState({
@@ -139,7 +171,7 @@ export function OutlookCard({ storeData, state, setState, onDisconnect }: Outloo
           service: "outlook",
           text: `${email.sender}: ${email.subject} (${email.date})`,
           link: email.link,
-          account: null,
+          account: account?.email || null,
         }))
         storeData("outlook", outlookData)
         toast.success("Outlook emails loaded!")
@@ -165,17 +197,22 @@ export function OutlookCard({ storeData, state, setState, onDisconnect }: Outloo
   }
 
   const summarizeSelected = async (forceRefresh = false) => {
-    if (selectedEmails.length === 0) return
+    const targetEmails = selectedEmails.length > 0
+      ? selectedEmails
+      : (account?.emails || []).map((e: OutlookEmail) => e.id).filter(Boolean)
+    if (targetEmails.length === 0) {
+      toast.warning("Select emails first, or load emails for this account.")
+      return
+    }
     setIsLoading(true)
 
     try {
-      const response = await fetch("/api/summarize_outlook_emails", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email_ids: selectedEmails, force_refresh: forceRefresh }),
-      })
-
-      const data = await response.json()
+      const data: any = await apiClient.summarizeOutlookEmails(
+        targetEmails,
+        forceRefresh,
+        account?.id,
+        account?.email || undefined,
+      )
 
       if (data.summary) {
         updateState({
@@ -194,7 +231,7 @@ export function OutlookCard({ storeData, state, setState, onDisconnect }: Outloo
             service: "outlook",
             text: `Outlook Summary: ${data.summary}`,
             link: null,
-            account: null,
+            account: account?.email || null,
           },
         ]
         storeData("outlook", summaryData)
@@ -229,48 +266,78 @@ export function OutlookCard({ storeData, state, setState, onDisconnect }: Outloo
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-bold">Outlook</h2>
         {isConnected && (
-          <div className="relative">
-            {showDisconnectConfirm ? (
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-300">Disconnect?</span>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => setIsMinimized((v) => !v)}
+              className="bg-white/10 hover:bg-white/20 border border-white/20 text-xs px-2 py-1"
+            >
+              {isMinimized ? "Expand" : "Minimize"}
+            </Button>
+            <div className="relative">
+              {showDisconnectConfirm ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-300">Disconnect?</span>
+                  <Button
+                    onClick={() => { onDisconnect(account?.email || undefined); setShowDisconnectConfirm(false) }}
+                    className="bg-red-600 hover:bg-red-700 text-xs px-2 py-1"
+                  >
+                    Yes
+                  </Button>
+                  <Button
+                    onClick={() => setShowDisconnectConfirm(false)}
+                    className="bg-gray-600 hover:bg-gray-700 text-xs px-2 py-1"
+                  >
+                    No
+                  </Button>
+                </div>
+              ) : (
                 <Button
-                  onClick={() => { onDisconnect(); setShowDisconnectConfirm(false) }}
-                  className="bg-red-600 hover:bg-red-700 text-xs px-2 py-1"
+                  onClick={() => setShowDisconnectConfirm(true)}
+                  className="bg-red-600/20 hover:bg-red-600/40 border border-red-500/30"
+                  title="Disconnect Outlook"
                 >
-                  Yes
+                  <Unplug className="w-4 h-4 mr-1" />
+                  Disconnect
                 </Button>
-                <Button
-                  onClick={() => setShowDisconnectConfirm(false)}
-                  className="bg-gray-600 hover:bg-gray-700 text-xs px-2 py-1"
-                >
-                  No
-                </Button>
-              </div>
-            ) : (
-              <Button
-                onClick={() => setShowDisconnectConfirm(true)}
-                className="bg-red-600/20 hover:bg-red-600/40 border border-red-500/30"
-                title="Disconnect Outlook"
-              >
-                <Unplug className="w-4 h-4 mr-1" />
-                Disconnect
-              </Button>
-            )}
+              )}
+            </div>
           </div>
         )}
       </div>
 
       {!account && (
-        <Button
-          onClick={connectOutlook}
-          className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700 mb-4"
-        >
-          Connect Microsoft
-        </Button>
+        <div className="mb-4 flex gap-2 flex-wrap">
+          {uniqueRememberedAccounts.map((saved) => (
+              <div key={`${saved.service_type}-${saved.account_email || saved.account_id}`} className="flex items-center gap-1">
+                <Button
+                  onClick={() => reconnectRememberedOutlook(saved.account_email, saved.account_id)}
+                  className="bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-400/40"
+                >
+                  Reconnect {saved.account_email || saved.account_id || "saved account"}
+                </Button>
+                {saved.account_email && (
+                  <Button
+                    onClick={() => onDisconnect(saved.account_email || undefined)}
+                    className="bg-red-600/20 hover:bg-red-600/40 border border-red-500/30 px-2"
+                  >
+                    Forget
+                  </Button>
+                )}
+              </div>
+            ))}
+          <Button
+            onClick={() => connectOutlook(true)}
+            className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700"
+          >
+            Authenticate New Microsoft Account
+          </Button>
+        </div>
       )}
 
       <p className="mb-4">Status: {status}</p>
 
+      {!isMinimized && (
+      <>
       {account && !account.isConnected && account.userCode && (
         <div className="mb-4 p-4 bg-blue-900/20 rounded-lg">
           <p className="mb-2">
@@ -326,6 +393,8 @@ export function OutlookCard({ storeData, state, setState, onDisconnect }: Outloo
             </div>
           )}
         </>
+      )}
+      </>
       )}
     </div>
   )

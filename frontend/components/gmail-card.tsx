@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { RefreshCw, Unplug } from "lucide-react"
 import { useToast } from "@/lib/toast-context"
@@ -12,6 +12,7 @@ import {
   type GmailConnectResponse,
   type GmailLabelsResponse,
   type SummarizeResponse,
+  type ConnectedService,
 } from "@/lib/api"
 import type { DataItem, GmailState } from "@/app/page"
 
@@ -19,7 +20,7 @@ interface GmailCardProps {
   storeData: (service: string, data: DataItem[]) => void
   state: GmailState
   setState: React.Dispatch<React.SetStateAction<GmailState>>
-  onDisconnect: () => void
+  onDisconnect: (accountEmail?: string) => void
 }
 
 interface GmailAccount {
@@ -29,6 +30,7 @@ interface GmailAccount {
   labels: GmailLabel[]
   isConnected: boolean
   showDatePicker: boolean
+  selectedDate?: string
   summary?: string
   summaryCached?: boolean
   summaryCachedAt?: string
@@ -38,27 +40,51 @@ export function GmailCard({ storeData, state, setState, onDisconnect }: GmailCar
   const { status, accounts, connectedCount } = state
   const toast = useToast()
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false)
+  const [rememberedAccounts, setRememberedAccounts] = useState<ConnectedService[]>([])
 
   const updateState = (updates: Partial<GmailState>) => {
     setState((prev) => ({ ...prev, ...updates }))
   }
 
-  const connectGmail = async (isAdditional = false) => {
+  useEffect(() => {
+    const loadRememberedAccounts = async () => {
+      try {
+        const response = await apiClient.getConnectedServices()
+        const remembered = (response.services || []).filter((s) => s.service_type === "gmail")
+        setRememberedAccounts(remembered)
+      } catch {
+        setRememberedAccounts([])
+      }
+    }
+    loadRememberedAccounts()
+  }, [])
+
+  const connectGmail = async (isAdditional = false, rememberedEmail?: string) => {
     updateState({ status: "Connecting Gmail... ⏳" })
 
     try {
-      const accountId = `gmail_${Date.now()}`
+      const accountId = rememberedEmail
+        ? `gmail_${rememberedEmail.replace(/[^a-zA-Z0-9]+/g, "_").toLowerCase()}`
+        : `gmail_${Date.now()}`
 
       const response = await fetch("/api/connect_gmail", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
           account_id: accountId,
+          ...(rememberedEmail ? { account_email: rememberedEmail } : {}),
+          reconnect_only: rememberedEmail ? "true" : "false",
           num_days: "0",
         }),
       })
 
       const data = await response.json()
+
+      if (data.status === "reauth_required") {
+        updateState({ status: "Reconnect requires authentication ❗" })
+        toast.warning(data.message || "Saved credentials not found. Please authenticate again.")
+        return
+      }
 
       if (data.status === "success") {
         const newAccount: GmailAccount = {
@@ -70,12 +96,21 @@ export function GmailCard({ storeData, state, setState, onDisconnect }: GmailCar
           showDatePicker: true,
         }
 
-        setState((prev) => ({
-          ...prev,
-          status: "Connected ✅ - Please select a date range",
-          connectedCount: prev.connectedCount + 1,
-          accounts: [...prev.accounts, newAccount],
-        }))
+        setState((prev) => {
+          const existingIndex = prev.accounts.findIndex((acc) => acc.email === newAccount.email)
+          const nextAccounts = [...prev.accounts]
+          if (existingIndex >= 0) {
+            nextAccounts[existingIndex] = { ...nextAccounts[existingIndex], ...newAccount }
+          } else {
+            nextAccounts.push(newAccount)
+          }
+          return {
+            ...prev,
+            status: "Connected ✅ - Please select a date range",
+            connectedCount: nextAccounts.length,
+            accounts: nextAccounts,
+          }
+        })
 
         toast.success("Gmail connected successfully!")
 
@@ -229,6 +264,9 @@ export function GmailCard({ storeData, state, setState, onDisconnect }: GmailCar
   }
 
   const isConnected = accounts.length > 0
+  const availableRemembered = rememberedAccounts.filter(
+    (r) => r.account_email && !accounts.some((acc) => acc.email === r.account_email)
+  )
 
   return (
     <div className="bg-amber-900/15 p-8 rounded-xl shadow-lg border border-white/20 mb-8">
@@ -267,19 +305,43 @@ export function GmailCard({ storeData, state, setState, onDisconnect }: GmailCar
       </div>
 
       <div className="mb-4">
+        {availableRemembered.length > 0 && (
+          <div className="mb-3 p-3 rounded-lg bg-white/5 border border-white/10">
+            <p className="text-sm mb-2">Previously connected Gmail accounts:</p>
+            <div className="flex gap-2 flex-wrap">
+              {availableRemembered.map((saved) => (
+                <div key={`${saved.service_type}-${saved.account_email}`} className="flex items-center gap-1">
+                  <Button
+                    onClick={() => connectGmail(true, saved.account_email || undefined)}
+                    className="bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-400/40"
+                  >
+                    Reconnect {saved.account_email}
+                  </Button>
+                  <Button
+                    onClick={() => onDisconnect(saved.account_email || undefined)}
+                    className="bg-red-600/20 hover:bg-red-600/40 border border-red-500/30 px-2"
+                    title="Forget this remembered account"
+                  >
+                    Forget
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {accounts.length === 0 ? (
           <Button
             onClick={() => connectGmail(false)}
             className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700"
           >
-            Connect Gmail
+            Authenticate New Gmail Account
           </Button>
         ) : (
           <Button
             onClick={() => connectGmail(true)}
             className="bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700"
           >
-            Connect Another Gmail Account
+            Authenticate Another Gmail Account
           </Button>
         )}
       </div>
@@ -293,6 +355,7 @@ export function GmailCard({ storeData, state, setState, onDisconnect }: GmailCar
           onSummarize={summarizeEmails}
           onRefresh={refreshGmailEmails}
           onFetchEmails={fetchEmailsFromDate}
+          onDisconnectAccount={(accountEmail) => onDisconnect(accountEmail)}
           accounts={accounts}
           updateAccounts={(newAccounts) => updateState({ accounts: newAccounts })}
         />
@@ -306,6 +369,7 @@ interface GmailAccountSectionProps {
   onSummarize: (accountId: string, selectedEmails: string[], forceRefresh?: boolean) => Promise<string | null>
   onRefresh: (accountId: string, labelId: string) => Promise<void>
   onFetchEmails: (accountId: string, startDate: string, labelId?: string) => Promise<void>
+  onDisconnectAccount: (accountEmail: string) => void
   accounts: GmailAccount[]
   updateAccounts: (accounts: GmailAccount[]) => void
 }
@@ -315,12 +379,14 @@ function GmailAccountSection({
   onSummarize,
   onRefresh,
   onFetchEmails,
+  onDisconnectAccount,
   accounts,
   updateAccounts,
 }: GmailAccountSectionProps) {
   const [selectedEmails, setSelectedEmails] = useState<string[]>([])
   const [selectedLabel, setSelectedLabel] = useState("INBOX")
   const [isLoading, setIsLoading] = useState(false)
+  const [isMinimized, setIsMinimized] = useState(false)
   const [selectedDate, setSelectedDate] = useState(account.selectedDate || "")
 
   const getDefaultDate = () => {
@@ -368,8 +434,26 @@ function GmailAccountSection({
 
   return (
     <div className="mb-6 p-4 border border-gray-600 rounded-lg">
-      <h3 className="text-lg font-semibold mb-3">Gmail Account: {account.email}</h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-lg font-semibold">Gmail Account: {account.email}</h3>
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={() => setIsMinimized((v) => !v)}
+            className="bg-white/10 hover:bg-white/20 border border-white/20 text-xs px-2 py-1"
+          >
+            {isMinimized ? "Expand" : "Minimize"}
+          </Button>
+          <Button
+            onClick={() => onDisconnectAccount(account.email)}
+            className="bg-red-600/20 hover:bg-red-600/40 border border-red-500/30 text-xs px-2 py-1"
+          >
+            Disconnect Account
+          </Button>
+        </div>
+      </div>
 
+      {!isMinimized && (
+      <>
       <div className="mb-4">
         <label htmlFor={`label-select-${account.id}`} className="block mb-2">
           Select Label:
@@ -486,6 +570,8 @@ function GmailAccountSection({
           </div>
           <p className="whitespace-pre-wrap">{account.summary}</p>
         </div>
+      )}
+      </>
       )}
     </div>
   )
