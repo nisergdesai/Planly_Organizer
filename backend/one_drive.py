@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 import time
 import json
 from config import Config
+from text_cleaning import clean_summary_text
 
 def summarize_content_with_gemini(content):
     client = genai.Client(api_key=Config.GEMINI_API_KEY)
@@ -49,10 +50,7 @@ def summarize_content_with_gemini(content):
         ]
         )
     )
-    # Replace asterisks with HTML-friendly bullet points and preserve line breaks
-    clean_text = response.text.replace("* ", "• ").replace("\n", "<br>")
-    
-    return clean_text
+    return clean_summary_text(response.text)
 
 GRAPH_API_ENDPOINT = 'https://graph.microsoft.com/v1.0'
 

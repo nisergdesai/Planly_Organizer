@@ -23,6 +23,7 @@ from drive_service import Create_Service_Drive
 from googleapiclient.discovery import build
 from google import genai
 from google.genai import types
+from text_cleaning import clean_summary_text
 from docx import Document
 from config import Config
 
@@ -146,10 +147,7 @@ def summarize_content_with_gemini(content, question='summarize'):
         )
     )
 
-    # Replace asterisks with HTML-friendly bullet points and preserve line breaks
-    clean_text = response.text.replace("* ", "• ").replace("\n", "<br>")
-    
-    return clean_text
+    return clean_summary_text(response.text)
 
 
 def get_cutoff_date():

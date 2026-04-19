@@ -7,6 +7,7 @@ import json
 import re
 import shutil
 import urllib.request
+from text_cleaning import clean_summary_text
 
 # Import Gmail processing functions
 from gmail_service import Create_Service
@@ -916,7 +917,7 @@ def summarize_selected_emails():
             cached = db_helpers.get_cached_summary('email_batch', source_id)
             if cached:
                 return jsonify({
-                    'summary': cached.summary_text,
+                    'summary': clean_summary_text(cached.summary_text),
                     'cached': True,
                     'cached_at': cached.created_at.isoformat() if cached.created_at else None
                 })
@@ -951,7 +952,8 @@ def summarize_selected_emails():
             except Exception as e:
                 print(f"Error summarizing email {msg_id}: {e}")
 
-        final_summary = "<br><br>".join(summaries) if summaries else "No emails selected for summarization."
+        final_summary = "\n\n".join(summaries) if summaries else "No emails selected for summarization."
+        final_summary = clean_summary_text(final_summary)
 
         # Cache the result
         try:
@@ -992,7 +994,7 @@ def summarize_outlook_emails():
             cached = db_helpers.get_cached_summary('email_batch', source_id)
             if cached:
                 return jsonify({
-                    'summary': cached.summary_text,
+                    'summary': clean_summary_text(cached.summary_text),
                     'cached': True,
                     'cached_at': cached.created_at.isoformat() if cached.created_at else None
                 })
@@ -1017,7 +1019,8 @@ def summarize_outlook_emails():
                 date = item.get('date', 'Unknown')
                 summary = item.get('summary', '')
                 summaries.append(f"Email from {sender}: \n({subject}) sent on \n{date}:\n{summary}\n")
-        final_summary = "<br><br>".join(summaries) if summaries else "No emails selected for summarization."
+        final_summary = "\n\n".join(summaries) if summaries else "No emails selected for summarization."
+        final_summary = clean_summary_text(final_summary)
         print(f"Outlook final_summary length: {len(final_summary)}")
         print(f"Outlook response: summary={'yes' if final_summary else 'no'}, cached=False")
 
@@ -1064,7 +1067,7 @@ def summarize():
                 cached = db_helpers.get_cached_summary(source_type, file_id)
                 if cached:
                     return jsonify({
-                        'summary': cached.summary_text,
+                        'summary': clean_summary_text(cached.summary_text),
                         'original_text': None,
                         'cached': True,
                         'cached_at': cached.created_at.isoformat() if cached.created_at else None
@@ -1108,6 +1111,7 @@ def summarize():
                 )
 
             # Cache the result
+            summary = clean_summary_text(summary)
             try:
                 db_helpers.save_summary(DEFAULT_USER_ID, source_type, file_id, summary)
             except Exception as db_err:
@@ -1147,7 +1151,7 @@ def ask_gemini():
 
     try:
         answer = summarize_content_with_gemini(combined_text, query)
-        return jsonify({"answer": answer})
+        return jsonify({"answer": clean_summary_text(answer)})
     except Exception as e:
         print(f"Error querying Gemini: {e}")
         return jsonify({"answer": f"Mock answer to your question: '{query}'. This is a test response."})
