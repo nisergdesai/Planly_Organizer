@@ -63,6 +63,9 @@ def derive_account_id(service_type: str, account_email: str | None) -> str | Non
     }.get(service_type, service_type)
     return f"{prefix}_{normalized}"
 
+def _demo_mode_enabled() -> bool:
+    return bool(getattr(Config, "DEMO_MODE", False))
+
 
 def _maybe_migrate_google_token(api_name: str, api_version: str, old_account_id: str, new_account_id: str):
     """Copy token pickle from transient account ID to stable account ID if needed."""
@@ -220,6 +223,35 @@ def connect_gmail():
     SCOPES = ['https://mail.google.com/']
     token_file = f"token_{API_NAME}_{API_VERSION}_{account_id}.pickle"
 
+    if _demo_mode_enabled():
+        email_address = requested_account_email or "demo.user@gmail.com"
+        stable_account_id = derive_account_id("gmail", email_address) or account_id
+        try:
+            db_helpers.save_service_connection(DEFAULT_USER_ID, 'gmail', {}, account_email=email_address)
+        except Exception as db_err:
+            print(f"Warning: Could not save service connection: {db_err}")
+        return jsonify({
+            "status": "success",
+            "account_id": stable_account_id,
+            "email_address": email_address,
+            "emails": [
+                {
+                    "id": "demo_gmail_1",
+                    "sender": "Handshake AI Showcase",
+                    "subject": "Welcome! Your demo is ready",
+                    "date": "04/19/26",
+                    "link": "https://mail.google.com",
+                },
+                {
+                    "id": "demo_gmail_2",
+                    "sender": "Team Updates",
+                    "subject": "Weekly status + next steps",
+                    "date": "04/18/26",
+                    "link": "https://mail.google.com",
+                },
+            ],
+        }), 200
+
     if reconnect_only and not os.path.exists(token_file):
         return jsonify({
             "status": "reauth_required",
@@ -347,6 +379,23 @@ def connect_google_drive():
     SCOPES = ['https://www.googleapis.com/auth/drive']
     token_file = f"token_{API_NAME}_{API_VERSION}_{account_id}.pickle"
 
+    if _demo_mode_enabled():
+        email_address = requested_account_email or "demo.user@gmail.com"
+        stable_account_id = derive_account_id("google_drive", email_address) or account_id
+        try:
+            db_helpers.save_service_connection(DEFAULT_USER_ID, 'google_drive', {}, account_email=email_address)
+        except Exception as db_err:
+            print(f"Warning: Could not save service connection: {db_err}")
+        return jsonify({
+            "status": "success",
+            "account_id": stable_account_id,
+            "email_address": email_address,
+            "files": [
+                {"id": "demo_drive_1", "name": "Demo Notes.pdf", "mimeType": "application/pdf"},
+                {"id": "demo_drive_2", "name": "Roadmap.xlsx", "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+            ],
+        }), 200
+
     if reconnect_only and not os.path.exists(token_file):
         return jsonify({
             "status": "reauth_required",
@@ -454,6 +503,19 @@ def fetch_code_outlook():
         if stable_from_email:
             account_id = stable_from_email
 
+    if _demo_mode_enabled():
+        email_address = requested_account_email or "demo.user@outlook.com"
+        stable_account_id = derive_account_id("outlook", email_address) or account_id
+        try:
+            db_helpers.save_service_connection(DEFAULT_USER_ID, 'outlook', {}, account_email=email_address)
+        except Exception as db_err:
+            print(f"Warning: Could not save Outlook service connection in demo mode: {db_err}")
+        return jsonify({
+            "status": "success",
+            "account_id": stable_account_id,
+            "email_address": email_address,
+        })
+
     token_file = _ms_token_file("outlook", account_id)
     if force_new_auth and os.path.exists(token_file):
         try:
@@ -548,6 +610,19 @@ def fetch_code_onedrive():
         stable_from_email = derive_account_id("onedrive", requested_account_email)
         if stable_from_email:
             account_id = stable_from_email
+
+    if _demo_mode_enabled():
+        email_address = requested_account_email or "demo.user@outlook.com"
+        stable_account_id = derive_account_id("onedrive", email_address) or account_id
+        try:
+            db_helpers.save_service_connection(DEFAULT_USER_ID, 'onedrive', {}, account_email=email_address)
+        except Exception as db_err:
+            print(f"Warning: Could not save OneDrive service connection in demo mode: {db_err}")
+        return jsonify({
+            "status": "success",
+            "account_id": stable_account_id,
+            "email_address": email_address,
+        })
 
     token_file = _ms_token_file("onedrive", account_id)
     if force_new_auth and os.path.exists(token_file):
@@ -651,6 +726,38 @@ def fetch_outlook():
 
     print(f"Outlook={cutoff_days_outlook}")  # Debugging
 
+    if _demo_mode_enabled():
+        demo_emails = [
+            {
+                "id": "demo_outlook_1",
+                "sender": "Demo Recruiter",
+                "subject": "Handshake AI Showcase logistics",
+                "date": "04/19/26",
+                "link": "https://outlook.office.com",
+                "summary": "Arrive 10 minutes early, bring a laptop, and be ready to demo end-to-end.",
+            },
+            {
+                "id": "demo_outlook_2",
+                "sender": "Calendar",
+                "subject": "Reminder: practice run",
+                "date": "04/18/26",
+                "link": "https://outlook.office.com",
+                "summary": "Do a full run-through and confirm demo mode works without accounts.",
+            },
+        ]
+        account_email = requested_account_email or "demo.user@outlook.com"
+        stable_account_id = derive_account_id("outlook", account_email) or account_id
+        try:
+            db_helpers.save_service_connection(DEFAULT_USER_ID, 'outlook', {}, account_email=account_email)
+        except Exception as db_err:
+            print(f"Warning: Could not save service connection: {db_err}")
+        return jsonify({
+            "status": "pending",
+            "outlooks": demo_emails,
+            "account_id": stable_account_id,
+            "email_address": account_email,
+        })
+
     try:
         access_token = _extract_access_token_from_file(token_file)
         if not access_token:
@@ -733,6 +840,23 @@ def fetch_onedrive():
 
     print(f"Received cutoff_days: OneDrive={cutoff_days_onedrive}, Outlook={cutoff_days_outlook}")  # Debugging
 
+    if _demo_mode_enabled():
+        account_email = requested_account_email or "demo.user@outlook.com"
+        stable_account_id = derive_account_id("onedrive", account_email) or account_id
+        try:
+            db_helpers.save_service_connection(DEFAULT_USER_ID, 'onedrive', {}, account_email=account_email)
+        except Exception as db_err:
+            print(f"Warning: Could not save service connection: {db_err}")
+        return jsonify({
+            "status": "pending",
+            "o_files": [
+                ["Demo PRD.docx", "demo_onedrive_1"],
+                ["Pitch Deck.pptx", "demo_onedrive_2"],
+            ],
+            "account_id": stable_account_id,
+            "email_address": account_email,
+        })
+
     try:
         access_token = _extract_access_token_from_file(token_file)
         if not access_token:
@@ -803,6 +927,19 @@ def index():
 def get_courses():
     print("Get courses endpoint hit!")
     try:
+        if _demo_mode_enabled():
+            try:
+                db_helpers.save_service_connection(DEFAULT_USER_ID, 'canvas', {})
+            except Exception as db_err:
+                print(f"Warning: Could not save service connection: {db_err}")
+            return jsonify({
+                "status": "success",
+                "courses": [
+                    {"id": "101", "name": "Demo Course: Product"},
+                    {"id": "102", "name": "Demo Course: Engineering"},
+                ],
+            })
+
         # Get active courses from Canvas using your existing function
         courses = get_active_courses()
 
@@ -856,6 +993,18 @@ def course_details():
             print(f"Warning: Cache lookup failed: {db_err}")
 
     try:
+        if _demo_mode_enabled():
+            demo_content = {
+                "syllabus": "Demo syllabus: show an end-to-end workflow and discuss design tradeoffs.",
+                "upcoming_assignments": "Upcoming: rehearse pitch, record backup demo video, finalize README.",
+                "recent_announcements": "Announcement: DEMO_MODE is enabled — no real accounts needed.",
+            }.get(content_type, "Invalid content type")
+            try:
+                db_helpers.save_summary(DEFAULT_USER_ID, 'canvas_course', source_id, demo_content)
+            except Exception:
+                pass
+            return jsonify({"content": demo_content, "cached": False})
+
         # Get all active courses and find the specific course by id
         courses = get_active_courses()
         course = next((course for course in courses if course['id'] == int(course_id)), None)
@@ -896,6 +1045,15 @@ def summarize_selected_emails():
     email_ids = data.get('email_ids', []) if data else []
     account_id = data.get('account_id', 'default') if data else 'default'
     force_refresh = data.get('force_refresh', False) if data else False
+
+    if _demo_mode_enabled():
+        demo_summary = clean_summary_text(
+            "Demo Gmail Summary:\n"
+            "- Prioritize the showcase checklist.\n"
+            "- Confirm the demo runs in DEMO_MODE.\n"
+            "- Keep the pitch to 2–3 minutes.\n"
+        )
+        return jsonify({'summary': demo_summary, 'cached': False})
 
     # Deduplicate email IDs while preserving order
     seen = set()
@@ -980,6 +1138,14 @@ def summarize_outlook_emails():
     account_id = data.get('account_id', 'outlook_default') if data else 'outlook_default'
     account_email = data.get('account_email') if data else None
 
+    if _demo_mode_enabled():
+        demo_summary = clean_summary_text(
+            "Demo Outlook Summary:\n"
+            "- Showcase logistics email received.\n"
+            "- Practice run reminder.\n"
+        )
+        return jsonify({'summary': demo_summary, 'cached': False})
+
     # Deduplicate email IDs
     email_ids = list(dict.fromkeys(email_ids))
 
@@ -1056,6 +1222,20 @@ def summarize():
         file_source = request.form.get('file_source')
         account_id = request.form.get('account_id')
         force_refresh = request.form.get('force_refresh', 'false').lower() == 'true'
+
+        if _demo_mode_enabled():
+            demo_original = f"Demo content for {file_name or 'file'} ({file_source or 'unknown source'})."
+            demo_summary = clean_summary_text(
+                f"Demo Summary ({file_name or 'file'}):\n"
+                "- Key points extracted.\n"
+                "- Action items listed.\n"
+                "- Ready for showcase.\n"
+            )
+            return jsonify({
+                'summary': demo_summary,
+                'original_text': demo_original,
+                'cached': False,
+            })
 
         print(f"Received for summarization: ID={file_id}, Name={file_name}, Type={file_mime_type}, Source={file_source}")
 
@@ -1141,6 +1321,15 @@ def ask_gemini():
     summary = data.get('summary', '').strip()
 
     print(f"Received query: {query}")
+
+    if _demo_mode_enabled():
+        return jsonify({
+            "answer": clean_summary_text(
+                "Demo answer:\n"
+                "- This is fixture data (DEMO_MODE).\n"
+                "- Connect real accounts by disabling DEMO_MODE and adding credentials.\n"
+            )
+        })
 
     if not query:
         return jsonify({"error": "No query provided"}), 400
@@ -1228,6 +1417,9 @@ def connected_services():
     """Get all active service connections."""
     print("Connected services endpoint hit!")
     try:
+        if _demo_mode_enabled():
+            return jsonify({"status": "success", "services": []})
+
         services = db_helpers.get_connected_services()
         existing_keys = {
             (
@@ -1264,7 +1456,10 @@ def connected_services():
 
 
 if __name__ == '__main__':
-    print("Starting Flask server on http://localhost:5001")
+    for warning in Config.validate():
+        print(f"Config: {warning}")
+
+    print(f"Starting Flask server on http://localhost:{Config.FLASK_PORT}")
     print("Available routes:")
     print("  GET  /health")
     print("  GET  /")
@@ -1282,4 +1477,4 @@ if __name__ == '__main__':
     print("  POST /ask_gemini")
     print("  POST /summarize_outlook_emails")
     print("  POST /disconnect/<service_type>")
-    app.run(debug=True, port=5001)
+    app.run(debug=Config.FLASK_DEBUG, port=Config.FLASK_PORT)

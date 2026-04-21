@@ -42,11 +42,14 @@ class Config:
     FLASK_SECRET_KEY: str = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
     FLASK_DEBUG: bool = os.getenv("FLASK_DEBUG", "false").lower() in ("true", "1", "yes")
     FLASK_PORT: int = int(os.getenv("FLASK_PORT", "5001"))
+    DEMO_MODE: bool = os.getenv("DEMO_MODE", "false").lower() in ("true", "1", "yes")
 
     @classmethod
     def validate(cls) -> list[str]:
         """Return a list of warnings for missing critical configuration."""
         warnings = []
+        if cls.DEMO_MODE:
+            warnings.append("DEMO_MODE is enabled — using fixture data (no real accounts).")
         if not cls.GEMINI_API_KEY:
             warnings.append("GEMINI_API_KEY is not set — Gemini summarization will fail.")
         if not cls.MICROSOFT_APP_ID:
