@@ -132,7 +132,7 @@ function createNetworkError(): ApiError {
 class ApiClient {
   private baseUrl: string
 
-  constructor(baseUrl = "/api") {
+  constructor(baseUrl = "/backend") {
     this.baseUrl = baseUrl
   }
 
