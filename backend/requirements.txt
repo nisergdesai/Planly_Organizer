@@ -205,6 +205,7 @@ spacy-legacy==3.0.12
 spacy-loggers==1.0.5
 SpeechRecognition==3.10.4
 srsly==2.5.1
+SQLAlchemy==2.0.36
 stack-data==0.6.3
 sumy==0.11.0
 sympy==1.13.1
