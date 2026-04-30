@@ -1,6 +1,9 @@
+import os
+from typing import Any
+
 import torch
-from transformers import DistilBertTokenizer, DistilBertForSequenceClassification
 from torch import nn
+from transformers import AutoTokenizer, DistilBertForSequenceClassification
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.stem import WordNetLemmatizer
 
@@ -31,14 +34,61 @@ class CustomDistilBertForSequenceClassification(DistilBertForSequenceClassificat
             return (loss, logits)
         return logits
 
-# Load the pre-trained DistilBERT model
-base_model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased", num_labels=3)
+_MODEL_DIR = os.getenv("EMAIL_TASK_MODEL_DIR", "model_trainer/email_task_classifier_cpu")
+_MODEL: CustomDistilBertForSequenceClassification | None = None
+_TOKENIZER: Any | None = None
+_MODEL_LOAD_ERROR: str | None = None
 
-# Load the custom model, using the base model's config and weights
-model = CustomDistilBertForSequenceClassification.from_pretrained('model_trainer/email_task_classifier_cpu', config=base_model.config)
 
-# Load the tokenizer
-tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
+def _simple_sentence_split(text: str) -> list[str]:
+    parts = []
+    for chunk in text.replace("\n", " ").split("."):
+        cleaned = chunk.strip()
+        if cleaned:
+            parts.append(cleaned + ".")
+    return parts
+
+
+def _get_sentences(text: str) -> list[str]:
+    try:
+        return sent_tokenize(text)
+    except Exception:
+        return _simple_sentence_split(text)
+
+
+def _ensure_model_loaded() -> bool:
+    """
+    Attempt to load the custom classifier from a local directory.
+
+    Important: this intentionally avoids downloading from HuggingFace Hub so
+    cloud deploys (Render) work without extra auth/network dependencies.
+    """
+    global _MODEL, _TOKENIZER, _MODEL_LOAD_ERROR
+    if _MODEL is not None and _TOKENIZER is not None:
+        return True
+    if _MODEL_LOAD_ERROR is not None:
+        return False
+
+    if not os.path.isdir(_MODEL_DIR):
+        _MODEL_LOAD_ERROR = f"Model directory not found: {_MODEL_DIR}"
+        return False
+
+    try:
+        _MODEL = CustomDistilBertForSequenceClassification.from_pretrained(
+            _MODEL_DIR,
+            local_files_only=True,
+        )
+        _TOKENIZER = AutoTokenizer.from_pretrained(
+            _MODEL_DIR,
+            local_files_only=True,
+            use_fast=True,
+        )
+        return True
+    except Exception as e:
+        _MODEL_LOAD_ERROR = str(e)
+        _MODEL = None
+        _TOKENIZER = None
+        return False
 
 # Function to preprocess the text (same as in process.py)
 def preprocess_text(text):
@@ -50,18 +100,22 @@ def preprocess_text(text):
 
 # Function to predict the label of new text
 def predict(text):
+    if not _ensure_model_loaded():
+        # Deployed environments may not include the optional classifier artifacts.
+        return 2  # "Other" / default class
+
     # Preprocess the input text
     processed_text = preprocess_text(text)
     
     # Tokenize and encode the text for the model
-    inputs = tokenizer(processed_text, truncation=True, padding=True, max_length=128, return_tensors='pt')
+    inputs = _TOKENIZER(processed_text, truncation=True, padding=True, max_length=128, return_tensors="pt")
 
     # Ensure the model is in evaluation mode
-    model.eval()
+    _MODEL.eval()
 
     # Predict the label
     with torch.no_grad():
-        outputs = model(**inputs)
+        outputs = _MODEL(**inputs)
         logits = outputs  # Now the output is a tensor directly
         prediction = torch.argmax(logits, dim=1).item()
         
@@ -70,7 +124,7 @@ def predict(text):
 # Function to predict each sentence in the input text
 # Function to predict each sentence in the input text
 def predict_sentences(text):
-    sentences = sent_tokenize(text)  # Split the text into sentences
+    sentences = _get_sentences(text)  # Split the text into sentences
     results = []
 
     for sentence in sentences:
@@ -82,7 +136,7 @@ def predict_sentences(text):
     return ' '.join(results)
 
 def predict_sentences_action_notes(text):
-    sentences = sent_tokenize(text)  # Split the text into sentences
+    sentences = _get_sentences(text)  # Split the text into sentences
     results = []
 
     for sentence in sentences:
@@ -92,15 +146,3 @@ def predict_sentences_action_notes(text):
 
     # Join the selected sentences into one paragraph
     return ' '.join(results)
-
-# Example: Feed a paragraph for prediction
-text = """
-While Stephen King is a bestselling horror author, his book On Writing is equal parts memoir and general writing advice for those seeking to hone their craft.  While aimed at writers of fiction, this chapter offers some helpful tips (as well as King's own pet peeves) that could be applied to a variety of writing situations.
-In a 250-500 word response, what aspects of King's toolbox (or his advice) do you find the most useful for writers in WRIT 2?  What do find not so useful?  As a writer, what is in your "toolbox"?"""
-# Get predictions for action tasks and important notes
-#output_paragraph = predict_sentences_action_notes(text)
-
-# Print the output paragraph
-#print("Output Paragraph:")
-#print(output_paragraph)
-
