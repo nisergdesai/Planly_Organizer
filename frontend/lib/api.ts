@@ -81,6 +81,12 @@ export interface MicrosoftCodeResponse {
   message?: string
 }
 
+export interface DemoModeResponse {
+  status: string
+  demo_mode: boolean
+  default_demo_mode?: boolean
+}
+
 // ApiError class with friendly messages
 export class ApiError extends Error {
   status: number
@@ -366,6 +372,19 @@ class ApiClient {
   async getConnectedServices(): Promise<{ status: string; services: ConnectedService[] }> {
     return this.request("/connected_services", {
       method: "GET",
+    })
+  }
+
+  async getDemoMode(): Promise<DemoModeResponse> {
+    return this.request("/demo_mode", {
+      method: "GET",
+    })
+  }
+
+  async setDemoMode(enabled: boolean): Promise<DemoModeResponse> {
+    return this.request("/demo_mode", {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
     })
   }
 }

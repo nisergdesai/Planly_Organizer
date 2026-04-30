@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, has_request_context
 from flask_cors import CORS
 from config import Config
 from functools import lru_cache
@@ -40,6 +40,7 @@ file_content = None
 gmail_services = {}
 drive_services = {}  # key = account_id, value = (service, credentials)
 ms_flows = {}  # key = "<service_type>:<account_id>", value = device flow payload
+DEMO_MODE_COOKIE = "planly_demo_mode"
 
 
 @lru_cache(maxsize=1)
@@ -88,8 +89,51 @@ def derive_account_id(service_type: str, account_email: str | None) -> str | Non
     }.get(service_type, service_type)
     return f"{prefix}_{normalized}"
 
+
+def _parse_bool(value: str | None) -> bool | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"true", "1", "yes", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "off"}:
+        return False
+    return None
+
+
 def _demo_mode_enabled() -> bool:
+    if has_request_context():
+        cookie_override = _parse_bool(request.cookies.get(DEMO_MODE_COOKIE))
+        if cookie_override is not None:
+            return cookie_override
     return bool(getattr(Config, "DEMO_MODE", False))
+
+
+@app.route('/demo_mode', methods=['GET', 'POST'])
+def demo_mode():
+    if request.method == 'GET':
+        return jsonify({
+            "status": "success",
+            "demo_mode": _demo_mode_enabled(),
+            "default_demo_mode": bool(getattr(Config, "DEMO_MODE", False)),
+        })
+
+    payload = request.get_json(silent=True) or {}
+    enabled = bool(payload.get("enabled"))
+    response = jsonify({
+        "status": "success",
+        "demo_mode": enabled,
+        "default_demo_mode": bool(getattr(Config, "DEMO_MODE", False)),
+    })
+    response.set_cookie(
+        DEMO_MODE_COOKIE,
+        "true" if enabled else "false",
+        max_age=60 * 60 * 24 * 30,
+        httponly=False,
+        samesite="Lax",
+        secure=False,
+    )
+    return response
 
 
 def _maybe_migrate_google_token(api_name: str, api_version: str, old_account_id: str, new_account_id: str):
