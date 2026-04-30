@@ -164,7 +164,6 @@ pydantic_core==2.23.3
 pyee==11.1.0
 Pygments==2.19.1
 PyJWT==2.9.0
-pymediainfo==6.1.0
 pymongo==4.10.1
 pyparsing==3.1.4
 PyPDF2==3.0.1
