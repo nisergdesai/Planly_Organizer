@@ -67,7 +67,7 @@ export function GmailCard({ storeData, state, setState, onDisconnect }: GmailCar
         ? `gmail_${rememberedEmail.replace(/[^a-zA-Z0-9]+/g, "_").toLowerCase()}`
         : `gmail_${Date.now()}`
 
-      const response = await fetch("/api/connect_gmail", {
+      const response = await fetch("/backend/connect_gmail", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({

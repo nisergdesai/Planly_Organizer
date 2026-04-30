@@ -201,7 +201,7 @@ export function OnedriveCard({ storeData, state, setState, onDisconnect }: Onedr
       if (account?.id) formData.append("account_id", account.id)
       formData.append("force_refresh", forceRefresh.toString())
 
-      const response = await fetch("/api/summarize", {
+      const response = await fetch("/backend/summarize", {
         method: "POST",
         body: formData,
       })

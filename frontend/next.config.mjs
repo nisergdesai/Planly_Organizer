@@ -11,7 +11,8 @@ const nextConfig = {
   async rewrites() {
     return [
       {
-        source: '/api/:path*',
+        // Avoid `/api` in production on Vercel (often reserved for platform/API routes).
+        source: '/backend/:path*',
         destination: `${backendOrigin}/:path*`,
       },
     ]

@@ -62,7 +62,7 @@ export function DriveCard({ storeData, state, setState, onDisconnect }: DriveCar
     updateState({ status: "Connecting Google Drive... ⏳" })
 
     try {
-      const response = await fetch("/api/connect_google_drive", {
+      const response = await fetch("/backend/connect_google_drive", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({

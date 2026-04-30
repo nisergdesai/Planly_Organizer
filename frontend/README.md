@@ -21,10 +21,10 @@ Open `http://localhost:3000`.
 ## How the Frontend Talks to the Backend
 
 This app uses a Next.js rewrite so the UI can call the backend via relative paths:
-- Frontend requests: `/api/<route>`
+- Frontend requests: `/backend/<route>`
 - Rewritten to: `BACKEND_ORIGIN/<route>` (defaults to `http://localhost:5001`)
 
-That means components should `fetch("/api/...")` (not hardcode `http://localhost:5001`).
+That means components should `fetch("/backend/...")` (not hardcode `http://localhost:5001`).
 
 ## For Showcase Demos
 
