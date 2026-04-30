@@ -5,7 +5,6 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import time
 import random
-from predict import predict_sentences
 
 CLIENT_FILE = 'credentials.json'
 API_NAME = 'gmail'

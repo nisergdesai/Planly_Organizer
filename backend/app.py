@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from config import Config
+from functools import lru_cache
 import os
 import time
 import json
@@ -11,21 +12,15 @@ from text_cleaning import clean_summary_text
 
 # Import Gmail processing functions
 from gmail_service import Create_Service
-from gmail import fetch_emails_in_date_ranges, get_message_content, get_message_metadata
 
 # Import Google Drive processing functions
 from drive_service import Create_Service_Drive
-from drive import setup_whisper, process_files, list_recent_drive_files, combine_file_contents, summarize_content_with_gemini
 
 # Import Microsoft (Outlook, OneDrive) processing functions
-from outlooks import display_and_summarize_emails
-from one_drive import navigate_onedrive, format_combined_content, get_onedrive_file_content, combined_content
 from graph_api import generate_access_token, generate_user_code
 
 # Import Canvas processing functions
 from canvas import get_active_courses, get_syllabus, get_recent_announcements, get_upcoming_assignments
-
-from predict import predict_sentences, predict_sentences_action_notes
 
 # Import database helpers
 import db_helpers
@@ -45,6 +40,36 @@ file_content = None
 gmail_services = {}
 drive_services = {}  # key = account_id, value = (service, credentials)
 ms_flows = {}  # key = "<service_type>:<account_id>", value = device flow payload
+
+
+@lru_cache(maxsize=1)
+def _gmail_module():
+    import gmail
+    return gmail
+
+
+@lru_cache(maxsize=1)
+def _drive_module():
+    import drive
+    return drive
+
+
+@lru_cache(maxsize=1)
+def _onedrive_module():
+    import one_drive
+    return one_drive
+
+
+@lru_cache(maxsize=1)
+def _outlooks_module():
+    import outlooks
+    return outlooks
+
+
+@lru_cache(maxsize=1)
+def _predict_module():
+    import predict
+    return predict
 
 
 def derive_account_id(service_type: str, account_email: str | None) -> str | None:
@@ -187,13 +212,14 @@ def health_check():
 
 # Process Gmail emails
 def fetch_email_metadata(g_service, days, label_ids=['INBOX']):
-    emails = fetch_emails_in_date_ranges(g_service, days=days, label_ids=label_ids, chunk_size=10)
+    gmail_module = _gmail_module()
+    emails = gmail_module.fetch_emails_in_date_ranges(g_service, days=days, label_ids=label_ids, chunk_size=10)
     email_list = []
 
     for email in emails:
         msg_id = email['id']
         try:
-            sender, formatted_date, subject = get_message_metadata(g_service, msg_id=msg_id)
+            sender, formatted_date, subject = gmail_module.get_message_metadata(g_service, msg_id=msg_id)
             email_link = f"https://mail.google.com/mail/u/0/#all/{msg_id}"
             email_list.append({"id": msg_id, "sender": sender, "subject": subject, "date": formatted_date, "link": email_link})
         except Exception as e:
@@ -355,7 +381,7 @@ def get_gmail_labels():
 
 def list_drive_files(d_service):
     if d_service:
-        return list_recent_drive_files(d_service, 112)
+        return _drive_module().list_recent_drive_files(d_service, 112)
     return ""
 
 # Google Drive API setup triggered by button click
@@ -429,7 +455,7 @@ def connect_google_drive():
             _maybe_migrate_google_token(API_NAME, API_VERSION, account_id, stable_account_id)
             drive_services[stable_account_id] = (service, credentials)
 
-            files = list_recent_drive_files(service, num_days=num_days)
+            files = _drive_module().list_recent_drive_files(service, num_days=num_days)
 
             # Save service connection to database
             try:
@@ -482,8 +508,9 @@ def process_drive_files(account_id):
     service_creds = drive_services.get(account_id)
     if service_creds:
         service, credentials = service_creds
-        whisper_model = setup_whisper()
-        return process_files(service, credentials, whisper_model)
+        drive_module = _drive_module()
+        whisper_model = drive_module.setup_whisper()
+        return drive_module.process_files(service, credentials, whisper_model)
     return ""
 
 
@@ -781,7 +808,7 @@ def fetch_outlook():
             access_token = token_response["access_token"]
 
         headers = {'Authorization': f'Bearer {access_token}'}
-        outlook_summary = display_and_summarize_emails(headers, cutoff_days_outlook)
+        outlook_summary = _outlooks_module().display_and_summarize_emails(headers, cutoff_days_outlook)
         account_email = (
             _extract_account_email_from_token_file(token_file)
             or _get_ms_account_email(access_token)
@@ -880,7 +907,7 @@ def fetch_onedrive():
             access_token = token_response["access_token"]
 
         headers = {'Authorization': f'Bearer {access_token}'}
-        onedrive_files = navigate_onedrive(headers, access_token, cutoff_days_onedrive)
+        onedrive_files = _onedrive_module().navigate_onedrive(headers, access_token, cutoff_days_onedrive)
         account_email = (
             _extract_account_email_from_token_file(token_file)
             or _get_ms_account_email(access_token)
@@ -1100,12 +1127,14 @@ def summarize_selected_emails():
     try:
         for msg_id in email_ids:
             try:
-                sender, formatted_date, subject = get_message_metadata(gmail_service, msg_id=msg_id)
-                content = get_message_content(gmail_service, msg_id=msg_id)
+                gmail_module = _gmail_module()
+                predict_module = _predict_module()
+                sender, formatted_date, subject = gmail_module.get_message_metadata(gmail_service, msg_id=msg_id)
+                content = gmail_module.get_message_content(gmail_service, msg_id=msg_id)
                 if content:
-                    summary = predict_sentences_action_notes(content)
+                    summary = predict_module.predict_sentences_action_notes(content)
                     if not any(char.isalpha() for char in summary):
-                        summary = predict_sentences_action_notes(content)
+                        summary = predict_module.predict_sentences_action_notes(content)
                     summaries.append(f"Sender: {sender}\nSubject: {subject}\nDate: {formatted_date}\nSummary:\n{summary}\n")
             except Exception as e:
                 print(f"Error summarizing email {msg_id}: {e}")
@@ -1176,7 +1205,7 @@ def summarize_outlook_emails():
             return jsonify({'summary': "Reconnect required for this Outlook account.", 'cached': False})
         headers = {'Authorization': 'Bearer ' + access_token}
 
-        email_data = display_and_summarize_emails(headers, cutoff_days_outlook)
+        email_data = _outlooks_module().display_and_summarize_emails(headers, cutoff_days_outlook)
         print(f"Outlook email_data returned: {len(email_data) if email_data else 0} items")
         if email_data:
             for item in email_data:
@@ -1263,8 +1292,9 @@ def summarize():
                 service_creds = drive_services.get(account_id)
                 if service_creds:
                     service, credentials = service_creds
-                    whisper_model = setup_whisper()
-                    file_content, summary = combine_file_contents(
+                    drive_module = _drive_module()
+                    whisper_model = drive_module.setup_whisper()
+                    file_content, summary = drive_module.combine_file_contents(
                         file_name, file_id, file_mime_type, credentials, service, whisper_model
                     )
                 else:
@@ -1286,7 +1316,7 @@ def summarize():
                 headers = {'Authorization': 'Bearer ' + access_token_str}
                 access_token = {'access_token': access_token_str}
 
-                file_content, summary = get_onedrive_file_content(
+                file_content, summary = _onedrive_module().get_onedrive_file_content(
                     headers, file_id, file_name, access_token, 300
                 )
 
@@ -1339,7 +1369,7 @@ def ask_gemini():
     combined_text = f"Original Content:\n{original_text}\n\nSummary:\n{summary}"
 
     try:
-        answer = summarize_content_with_gemini(combined_text, query)
+        answer = _drive_module().summarize_content_with_gemini(combined_text, query)
         return jsonify({"answer": clean_summary_text(answer)})
     except Exception as e:
         print(f"Error querying Gemini: {e}")
