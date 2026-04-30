@@ -21,12 +21,12 @@ export function ServiceLogos({ onServiceClick, isShrunken }: ServiceLogosProps) 
     },
     {
       id: "outlook" as const,
-      src: "https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg",
+      src: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/cc/Microsoft_Outlook_Icon_%282025%E2%80%93present%29.svg/960px-Microsoft_Outlook_Icon_%282025%E2%80%93present%29.svg.png",
       alt: "Outlook",
     },
     {
       id: "onedrive" as const,
-      src: "https://upload.wikimedia.org/wikipedia/commons/3/3c/Microsoft_Office_OneDrive_%282019%E2%80%93present%29.svg",
+      src: "https://www.usi.edu/media/1nrb3yxa/onedrive.png?rmode=max&width=256&height=256",
       alt: "OneDrive",
     },
     { id: "canvas" as const, src: "https://www.wabash.edu/images2/technology/canvas.png", alt: "Canvas" },

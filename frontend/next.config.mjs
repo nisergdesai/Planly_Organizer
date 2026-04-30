@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+const backendOrigin = (process.env.BACKEND_ORIGIN || "http://localhost:5001").replace(/\/$/, "")
+
 const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
@@ -10,7 +12,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:5001/:path*', // Changed to port 5001
+        destination: `${backendOrigin}/:path*`,
       },
     ]
   },

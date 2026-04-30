@@ -1477,4 +1477,4 @@ if __name__ == '__main__':
     print("  POST /ask_gemini")
     print("  POST /summarize_outlook_emails")
     print("  POST /disconnect/<service_type>")
-    app.run(debug=Config.FLASK_DEBUG, port=Config.FLASK_PORT)
+    app.run(host=Config.FLASK_HOST, debug=Config.FLASK_DEBUG, port=Config.FLASK_PORT)

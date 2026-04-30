@@ -49,7 +49,7 @@ export function CanvasCard({ storeData, state, setState, onDisconnect }: CanvasC
     updateState({ status: "Connecting Canvas... ⏳" })
 
     try {
-      const response = await fetch("http://localhost:5001/get_courses")
+      const response = await fetch("/api/get_courses")
       const data = await response.json()
 
       if (data.status === "success" && data.courses) {
@@ -74,7 +74,7 @@ export function CanvasCard({ storeData, state, setState, onDisconnect }: CanvasC
 
   const fetchContent = async (courseId: string, contentType: string, forceRefresh = false) => {
     try {
-      const response = await fetch("http://localhost:5001/course_details", {
+      const response = await fetch("/api/course_details", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

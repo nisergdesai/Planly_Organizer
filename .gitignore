@@ -57,8 +57,14 @@ high-impact-changes/
 planly-db-changes/
 planly-db-changes.zip
 
+# Local Docker dev files (intentionally not part of submission)
+docker-compose.yml
+backend/Dockerfile.dev
+backend/.dockerignore
+frontend/Dockerfile.dev
+frontend/.dockerignore
+
 # Debug/test scripts
 backend/debug_web_auth.py
 backend/test_auth.py
 backend/test_flask_endpoints.py
-backend/setup_guide.md

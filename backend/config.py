@@ -41,6 +41,7 @@ class Config:
     # --- Flask ---
     FLASK_SECRET_KEY: str = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
     FLASK_DEBUG: bool = os.getenv("FLASK_DEBUG", "false").lower() in ("true", "1", "yes")
+    FLASK_HOST: str = os.getenv("FLASK_HOST", "0.0.0.0")
     FLASK_PORT: int = int(os.getenv("FLASK_PORT", "5001"))
     DEMO_MODE: bool = os.getenv("DEMO_MODE", "false").lower() in ("true", "1", "yes")
 
