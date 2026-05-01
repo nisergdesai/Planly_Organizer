@@ -108,7 +108,7 @@ export function DriveCard({ storeData, state, setState, onDisconnect }: DriveCar
         toast.success("Google Drive connected successfully!")
       } else {
         updateState({ status: "Connection Failed ❌" })
-        toast.error(data.message || "Failed to connect Google Drive.")
+        toast.error("Failed to connect Google Drive.")
       }
     } catch (error) {
       updateState({ status: "Connection Error ❌" })

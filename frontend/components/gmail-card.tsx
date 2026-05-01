@@ -131,7 +131,7 @@ export function GmailCard({ storeData, state, setState, onDisconnect }: GmailCar
         }
       } else {
         updateState({ status: "Connection Failed ❌" })
-        toast.error(data.message || "Failed to connect Gmail.")
+        toast.error("Failed to connect Gmail.")
       }
     } catch (error) {
       updateState({ status: "Connection Error ❌" })
