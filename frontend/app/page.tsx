@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { ServiceLogos } from "@/components/service-logos"
 import { SearchContainer } from "@/components/search-container"
 import { GmailCard } from "@/components/gmail-card"
@@ -56,9 +56,6 @@ export interface CanvasState {
 export default function Dashboard() {
   const [activeService, setActiveService] = useState<ServiceType>(null)
   const [allData, setAllData] = useState<DataItem[]>([])
-  const [demoMode, setDemoMode] = useState(true)
-  const [loadingDemoMode, setLoadingDemoMode] = useState(true)
-  const [switchingDemoMode, setSwitchingDemoMode] = useState(false)
   const toast = useToast()
 
   // Persistent service states
@@ -196,69 +193,8 @@ export default function Dashboard() {
     }
   }
 
-  useEffect(() => {
-    const loadDemoMode = async () => {
-      try {
-        const response = await apiClient.getDemoMode()
-        setDemoMode(response.demo_mode)
-      } catch {
-        setDemoMode(true)
-      } finally {
-        setLoadingDemoMode(false)
-      }
-    }
-    loadDemoMode()
-  }, [])
-
-  const toggleDemoMode = async () => {
-    const nextMode = !demoMode
-    setSwitchingDemoMode(true)
-    try {
-      await apiClient.setDemoMode(nextMode)
-      setDemoMode(nextMode)
-      toast.success(
-        nextMode
-          ? "Demo mode enabled. Reloading with fixture data."
-          : "Live mode enabled. Reloading for real account connections.",
-      )
-      window.location.reload()
-    } catch (error) {
-      if (error instanceof ApiError) {
-        toast.error(error.friendlyMessage)
-      } else {
-        toast.error("Could not switch modes right now.")
-      }
-      setSwitchingDemoMode(false)
-    }
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-r from-blue-800 to-amber-800 text-gray-100 flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-4xl flex justify-end mb-4">
-        <button
-          type="button"
-          onClick={toggleDemoMode}
-          disabled={loadingDemoMode || switchingDemoMode}
-          className="rounded-full border border-white/30 bg-black/20 px-4 py-2 text-sm font-medium transition hover:bg-black/30 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {loadingDemoMode
-            ? "Checking mode..."
-            : switchingDemoMode
-              ? "Switching..."
-              : demoMode
-                ? "Switch to Real Accounts"
-                : "Switch to Demo Mode"}
-        </button>
-      </div>
-
-      {!loadingDemoMode && (
-        <div className="mb-4 rounded-full border border-white/20 bg-black/20 px-4 py-2 text-sm">
-          {demoMode
-            ? "Demo mode is on. The app uses fixture data until you switch to real accounts."
-            : "Live mode is on. Real account connection flows are enabled for this browser."}
-        </div>
-      )}
-
       <ServiceLogos onServiceClick={showDashboard} isShrunken={activeService !== null} />
 
       {activeService && (
