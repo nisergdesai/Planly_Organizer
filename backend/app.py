@@ -101,12 +101,31 @@ def _parse_bool(value: str | None) -> bool | None:
     return None
 
 
+def _hosted_environment() -> bool:
+    return bool(
+        os.getenv("RENDER")
+        or os.getenv("RENDER_EXTERNAL_URL")
+        or os.getenv("VERCEL")
+    )
+
+
 def _demo_mode_enabled() -> bool:
     if has_request_context():
         cookie_override = _parse_bool(request.cookies.get(DEMO_MODE_COOKIE))
         if cookie_override is not None:
             return cookie_override
     return bool(getattr(Config, "DEMO_MODE", False))
+
+
+def _google_oauth_hosted_error(service_name: str):
+    return jsonify({
+        "status": "error",
+        "message": (
+            f"{service_name} real-account sign-in is not supported in the hosted demo yet. "
+            "This deployment uses a desktop-style Google OAuth flow that only works locally. "
+            "Use Demo Mode here, or run the app locally to connect a real Google account."
+        ),
+    }), 400
 
 
 @app.route('/demo_mode', methods=['GET', 'POST'])
@@ -331,6 +350,9 @@ def connect_gmail():
             "emails": [],
         }), 200
 
+    if _hosted_environment():
+        return _google_oauth_hosted_error("Gmail")
+
     try:
         gmail_service = Create_Service(
             CLIENT_FILE,
@@ -373,28 +395,13 @@ def connect_gmail():
             return jsonify({"status": "error", "message": "Failed to Connect to Gmail"}), 500
     except Exception as e:
         print(f"Error in connect_gmail: {str(e)}")
-        # Return mock data for testing if credentials are missing
         return jsonify({
-            "status": "success",
+            "status": "error",
+            "message": f"Failed to connect Gmail: {str(e)}",
             "account_id": account_id,
-            "email_address": "test@gmail.com",
-            "emails": [
-                {
-                    "id": "1",
-                    "sender": "Test Sender",
-                    "subject": "Test Email Subject",
-                    "date": "2024-01-01",
-                    "link": "https://mail.google.com"
-                },
-                {
-                    "id": "2",
-                    "sender": "Another Sender",
-                    "subject": "Another Test Email",
-                    "date": "2024-01-02",
-                    "link": "https://mail.google.com"
-                }
-            ]
-        })
+            "email_address": requested_account_email,
+            "emails": [],
+        }), 500
 
 @app.route('/get_gmail_labels', methods=['POST'])
 def get_gmail_labels():
@@ -475,6 +482,9 @@ def connect_google_drive():
             "files": [],
         }), 200
 
+    if _hosted_environment():
+        return _google_oauth_hosted_error("Google Drive")
+
     # Get the num_days from the frontend
     num_days = int(request.form.get("num_days", -1))  # Default to 15 if not provided
     print(f"Received num_days: {num_days}")  # Debugging
@@ -525,24 +535,13 @@ def connect_google_drive():
             return jsonify({"status": "error", "message": "Failed to Connect to Google Drive"}), 500
     except Exception as e:
         print(f"Error in connect_google_drive: {str(e)}")
-        # Return mock data for testing if credentials are missing
         return jsonify({
-            "status": "success",
+            "status": "error",
+            "message": f"Failed to connect Google Drive: {str(e)}",
             "account_id": account_id,
-            "email_address": "test@gmail.com",
-            "files": [
-                {
-                    "id": "1",
-                    "name": "Test Document.pdf",
-                    "mimeType": "application/pdf"
-                },
-                {
-                    "id": "2",
-                    "name": "Sample Spreadsheet.xlsx",
-                    "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                }
-            ]
-        })
+            "email_address": requested_account_email,
+            "files": [],
+        }), 500
 
 
 # List recent Google Drive files (only if already connected)
